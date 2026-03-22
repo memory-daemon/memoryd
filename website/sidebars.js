@@ -21,6 +21,7 @@ const sidebars = {
         'how-it-works/write-path',
         'how-it-works/quality-loop',
         'how-it-works/hybrid-search',
+        'how-it-works/architecture',
       ],
     },
     'configuration',
