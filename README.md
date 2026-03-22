@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/jeff-vincent/memoryd/actions/workflows/ci.yml/badge.svg)](https://github.com/jeff-vincent/memoryd/actions/workflows/ci.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/jeff-vincent/memoryd)](https://goreportcard.com/report/github.com/jeff-vincent/memoryd)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/jeff-vincent/memoryd)](go.mod)
+[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?logo=go&logoColor=white)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-memoryd-orange)](https://jeff-vincent.github.io/memoryd/)
 
