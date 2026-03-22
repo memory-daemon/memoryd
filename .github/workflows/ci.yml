@@ -49,9 +49,7 @@ jobs:
           go-version: "1.26"
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest && golangci-lint run
 
   vet:
     name: Vet
