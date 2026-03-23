@@ -11,17 +11,21 @@ Proxy mode is the zero-effort way to connect Claude Code (or any Anthropic-based
 
 memoryd runs a local proxy on each team member's machine. When they point their AI tool at it, the proxy:
 
-1. **On the way out** — searches the shared knowledge store and injects relevant context into the prompt
-2. **On the way back** — captures the response, processes it through the [knowledge capture pipeline](../how-it-works/write-path), and stores it
+1. **On the way out** — forwards the request to the LLM provider exactly as-is, with no modifications
+2. **On the way back** — streams the response to the developer in real-time, then asynchronously processes the conversation through the [knowledge capture pipeline](../how-it-works/write-path) and stores it
 
-The AI tool doesn't know memoryd is there. The developer doesn't change their workflow. Knowledge just accumulates.
+The proxy is a true passthrough — it never modifies prompts or responses. Knowledge capture happens entirely in the background after the response is delivered. The developer doesn't change their workflow. Knowledge just accumulates.
+
+To **retrieve** stored knowledge, team members use the [MCP server](mcp-server). The MCP tools (`memory_search`, `memory_list`, etc.) are how AI tools access the shared knowledge base.
 
 ```
 AI tool → memoryd proxy (local) → Anthropic API
                ↓                       ↓
-     inject team context        capture response
-               ↓                       ↓
-          shared Atlas store (async, background)
+        passthrough (no changes)  stream response back
+                                       ↓
+                              capture async (background)
+                                       ↓
+                              shared Atlas store
 ```
 
 ## Setup
@@ -57,12 +61,17 @@ The proxy also serves a dashboard at `http://localhost:7432` where team members 
 - View quality statistics
 - Monitor ingested sources
 
-## When to use proxy vs. MCP
+## Proxy + MCP: the recommended setup
 
-| Use proxy when... | Use MCP when... |
+Proxy mode handles **automatic capture** — it passively records knowledge from every session. The MCP server handles **everything else** — retrieval, explicit storage, and knowledge maintenance.
+
+Most teams use both together:
+
+| Component | Role |
 |---|---|
-| Your team uses Claude Code | Your team uses Cursor, Windsurf, or other tools |
-| You want fully automatic capture | You want agents to control what gets stored |
-| You want zero workflow changes | You need integration with non-Anthropic tools |
+| **Proxy** | Automatic knowledge capture from every conversation |
+| **MCP server** | Knowledge retrieval, search, explicit store, and maintenance (updating outdated items) |
 
-Many teams use both — proxy for Claude Code users, MCP for everyone else. They all feed the same shared store.
+For Claude Code, both run simultaneously — proxy captures in the background while MCP tools give the agent full access to the knowledge base, including the ability to correct outdated information. For Cursor, Windsurf, and other tools, MCP handles both capture and management.
+
+They all feed and read from the same shared store.

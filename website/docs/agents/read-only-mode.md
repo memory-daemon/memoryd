@@ -63,7 +63,7 @@ memoryd supports a range of participation levels across a team:
 | Level | How | Best for |
 |---|---|---|
 | **Full (proxy)** | Automatic capture + retrieval | Engineers using Claude Code who want zero-effort contribution |
-| **Full (MCP)** | Agent-controlled search + store | Engineers using Cursor, Windsurf, custom tools |
+| **Full (MCP)** | Agent-controlled search, store, and maintenance | Engineers using Cursor, Windsurf, custom tools |
 | **Read-only** | Search only, no writes | New hires, evaluators, PMs, cross-team consumers |
 | **Isolated** | Separate database | Anyone who needs a private knowledge store |
 

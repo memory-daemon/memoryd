@@ -39,8 +39,8 @@ memoryd is **tool-agnostic**. It connects to your team's tools through two inter
 
 | Interface | Best for | How it works |
 |-----------|----------|-------------|
-| **[Proxy mode](agents/proxy-mode)** | Claude Code, any Anthropic-based tool | Transparent — set one environment variable, work normally. Knowledge captured automatically. |
-| **[MCP server](agents/mcp-server)** | Cursor, Windsurf, Cline, custom tools | Standard protocol — agent searches and stores knowledge via tool calls. |
+| **[Proxy mode](agents/proxy-mode)** | Claude Code, any Anthropic-based tool | Passthrough — set one environment variable, work normally. Conversations captured automatically in the background. |
+| **[MCP server](agents/mcp-server)** | Cursor, Windsurf, Cline, custom tools | Standard protocol — agent searches, stores, and maintains knowledge via tool calls. |
 
 Teams don't need to standardize on one tool. Alice uses Claude Code, Bob uses Cursor, Carol has a custom pipeline — they all feed and draw from the same knowledge store. There's also a **[read-only mode](agents/read-only-mode)** for teams or tools that should consume knowledge without contributing.
 
@@ -48,9 +48,9 @@ Teams don't need to standardize on one tool. Alice uses Claude Code, Bob uses Cu
 
 You don't need to understand the internals to use it, but here's what's happening under the hood:
 
-1. **[Knowledge capture](how-it-works/write-path)** — Every AI interaction is automatically broken into meaningful pieces, scrubbed of secrets (API keys, tokens, passwords), deduplicated against what's already known, and stored.
+1. **[Knowledge capture](how-it-works/write-path)** — Every AI interaction routed through the proxy is automatically broken into meaningful pieces, scrubbed of secrets (API keys, tokens, passwords), deduplicated against what's already known, and stored.
 
-2. **[Context retrieval](how-it-works/read-path)** — When someone starts a new AI session, relevant knowledge from the shared store is automatically surfaced. The agent sees prior context without anyone asking for it.
+2. **[Knowledge retrieval & maintenance](how-it-works/read-path)** — AI tools access and manage the shared knowledge base through MCP tools — searching, storing, and updating knowledge. When a tool receives outdated information, it corrects the record so the whole team benefits.
 
 3. **[Quality maintenance](how-it-works/quality-loop)** — A background process continuously scores knowledge by how useful it's been, removes noise, and merges near-duplicates. The store stays clean without manual curation.
 
