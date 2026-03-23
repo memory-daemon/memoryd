@@ -90,28 +90,51 @@ func startCmd() *cobra.Command {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			// 1. Connect to MongoDB
-			var st *store.MongoStore
-			var searchStore store.Store // may be AtlasStore (HybridSearcher) or MongoStore
-			if cfg.AtlasMode {
-				log.Println("Connecting to MongoDB Atlas (atlas_mode: on)...")
-				atlas, err := store.NewAtlasStore(ctx, cfg.MongoDBAtlasURI, cfg.MongoDBDatabase)
-				if err != nil {
-					return err
+			// 1. Connect to MongoDB — build entries for each configured database
+			databases := cfg.ResolvedDatabases()
+			log.Printf("Connecting to %d database(s)...", len(databases))
+
+			var entries []store.DatabaseEntry
+			for _, dbCfg := range databases {
+				var ms *store.MongoStore
+				var ss store.Store
+				if cfg.AtlasMode {
+					atlas, err := store.NewAtlasStore(ctx, cfg.MongoDBAtlasURI, dbCfg.Database)
+					if err != nil {
+						return fmt.Errorf("connecting to database %q: %w", dbCfg.Name, err)
+					}
+					ms = atlas.MongoStore
+					ss = atlas
+				} else {
+					var err error
+					ms, err = store.NewMongoStore(ctx, cfg.MongoDBAtlasURI, dbCfg.Database)
+					if err != nil {
+						return fmt.Errorf("connecting to database %q: %w", dbCfg.Name, err)
+					}
+					ss = ms
 				}
-				st = atlas.MongoStore
-				searchStore = atlas // AtlasStore implements HybridSearcher
-				defer atlas.Close()
-			} else {
-				log.Println("Connecting to MongoDB (local mode)...")
-				var err error
-				st, err = store.NewMongoStore(ctx, cfg.MongoDBAtlasURI, cfg.MongoDBDatabase)
-				if err != nil {
-					return err
+				role := dbCfg.Role
+				if role == "" {
+					role = config.RoleFull
 				}
-				searchStore = st
-				defer st.Close()
+				log.Printf("  [%s] database=%s role=%s atlas=%v", dbCfg.Name, dbCfg.Database, role, cfg.AtlasMode)
+				entries = append(entries, store.DatabaseEntry{
+					Name:        dbCfg.Name,
+					Database:    dbCfg.Database,
+					Role:        role,
+					Store:       ms,
+					SearchStore: ss,
+					Mongo:       ms,
+				})
 			}
+
+			multi, err := store.NewMultiStore(entries)
+			if err != nil {
+				return fmt.Errorf("building multi-store: %w", err)
+			}
+			defer multi.Close()
+
+			primary := multi.Primary()
 
 			// 2. Start the embedding model
 			log.Println("Loading embedding model...")
@@ -122,23 +145,25 @@ func startCmd() *cobra.Command {
 			defer emb.Close()
 
 			// 3. Build pipelines
-			qt := quality.NewTracker(st, quality.DefaultThreshold)
-			read := pipeline.NewReadPipeline(emb, searchStore, cfg, pipeline.WithQualityTracker(qt))
-			write := pipeline.NewWritePipeline(emb, st)
+			// Read pipeline uses MultiStore (fan-out search across all databases).
+			// Write pipeline uses primary store (default write target).
+			qt := quality.NewTracker(primary.Mongo, quality.DefaultThreshold)
+			read := pipeline.NewReadPipeline(emb, multi, cfg, pipeline.WithQualityTracker(qt))
+			write := pipeline.NewWritePipeline(emb, primary.Store)
 
-			// 4. Build ingester
-			ing := ingest.NewIngester(emb, st, st)
+			// 4. Build ingester (operates on primary database)
+			ing := ingest.NewIngester(emb, primary.Mongo, primary.Mongo)
 
 			// 5. Start the proxy
 			srv := proxy.NewServer(cfg, read, write,
-				proxy.WithStore(st),
-				proxy.WithSourceStore(st),
+				proxy.WithStore(multi),
+				proxy.WithSourceStore(primary.Mongo),
 				proxy.WithIngester(ing),
 				proxy.WithQuality(qt),
 				proxy.WithEmbedder(emb),
 			)
 
-			// 6. Start the memory steward (background quality maintenance)
+			// 6. Start a steward for each writable database
 			stwCfg := steward.Config{
 				Interval:         cfg.Steward.Interval(),
 				PruneThreshold:   cfg.Steward.PruneThreshold,
@@ -147,8 +172,16 @@ func startCmd() *cobra.Command {
 				MergeThreshold:   cfg.Steward.MergeThreshold,
 				BatchSize:        cfg.Steward.BatchSize,
 			}
-			stw := steward.New(stwCfg, st)
-			stw.Start(ctx)
+			var stewards []*steward.Steward
+			for _, e := range multi.Entries() {
+				if !e.IsWritable() {
+					continue
+				}
+				stw := steward.New(stwCfg, e.Mongo)
+				stw.Start(ctx)
+				stewards = append(stewards, stw)
+				log.Printf("  [%s] steward started", e.Name)
+			}
 
 			// Graceful shutdown on SIGINT / SIGTERM
 			sigCh := make(chan os.Signal, 1)
@@ -157,7 +190,9 @@ func startCmd() *cobra.Command {
 			go func() {
 				<-sigCh
 				log.Println("Shutting down...")
-				stw.Stop()
+				for _, stw := range stewards {
+					stw.Stop()
+				}
 				if err := srv.Stop(); err != nil {
 					log.Printf("server stop error: %v", err)
 				}
@@ -400,7 +435,7 @@ func connectStore() (*store.MongoStore, error) {
 	if cfg.MongoDBAtlasURI == "" {
 		return nil, fmt.Errorf("mongodb_atlas_uri not configured -- edit %s", config.Path())
 	}
-	return store.NewMongoStore(context.Background(), cfg.MongoDBAtlasURI, cfg.MongoDBDatabase)
+	return store.NewMongoStore(context.Background(), cfg.MongoDBAtlasURI, cfg.DefaultDatabase())
 }
 
 func ingestCmd() *cobra.Command {

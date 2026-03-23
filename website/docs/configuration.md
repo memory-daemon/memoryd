@@ -37,7 +37,7 @@ embedding_dim: 1024
 # Number of knowledge items retrieved per query (default: 5)
 retrieval_top_k: 5
 
-# Maximum tokens of context injected per request (default: 2048)
+# Maximum tokens of context returned per search (default: 2048)
 retrieval_max_tokens: 2048
 
 # Upstream LLM provider URL (default: https://api.anthropic.com)

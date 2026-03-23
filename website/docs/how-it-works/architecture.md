@@ -11,10 +11,10 @@ This page is for the technically curious — the design choices behind memoryd, 
 
 memoryd runs as a local daemon on each team member's machine. It serves two roles simultaneously:
 
-1. **HTTP proxy** — intercepts API traffic between the AI tool and the LLM provider, capturing knowledge from responses and injecting context into prompts
-2. **MCP server** — exposes knowledge operations over the Model Context Protocol for tools that support it
+1. **HTTP proxy** — a passthrough proxy between the AI tool and the LLM provider. Forwards requests unmodified and captures responses asynchronously for knowledge storage.
+2. **MCP server** — exposes knowledge operations (search, store, delete, ingest) over the Model Context Protocol. This is how AI tools access the shared knowledge base.
 
-Both interfaces share the same read and write pipelines, the same store, and the same quality system. The daemon binds to `127.0.0.1` only — it's never exposed to the network.
+The proxy handles **capture** (write path only). The MCP server handles **retrieval and explicit operations** (read path + write path). Both share the same store and quality system. The daemon binds to `127.0.0.1` only — it's never exposed to the network.
 
 ```
 ┌─────────────────────────────────────────────┐
@@ -26,11 +26,11 @@ Both interfaces share the same read and write pipelines, the same store, and the
 │  └────┬─────┘  └─────┬─────┘  └──────────┘ │
 │       │               │                      │
 │  ┌────▼───────────────▼─────┐               │
-│  │    Read Pipeline          │               │
-│  │  embed → search → inject  │               │
+│  │    Read Pipeline (MCP)    │               │
+│  │  embed → search → return  │               │
 │  └──────────────────────────┘               │
 │  ┌──────────────────────────┐               │
-│  │    Write Pipeline (async) │               │
+│  │  Write Pipeline (async)   │               │
 │  │  chunk → filter → redact  │               │
 │  │  → embed → dedup → store  │               │
 │  └──────────────────────────┘               │
@@ -171,12 +171,12 @@ A second pass scans each line for key-value patterns containing sensitive keywor
 
 The proxy handles Server-Sent Events (SSE) end-to-end:
 
-1. Request arrives → system prompt enriched with retrieved context → forwarded to upstream
+1. Request arrives → forwarded to upstream exactly as-is (no modification)
 2. Response streams back to the client in real-time via `http.Flusher`
 3. Simultaneously, `text_delta` events are buffered
 4. After stream completion, the buffered text enters the write pipeline asynchronously
 
-**Why this matters:** The write pipeline runs in a goroutine — it never blocks the response stream. Knowledge capture adds exactly zero latency to the developer experience. This is critical for adoption: if memoryd made AI tools feel slower, no one would use it.
+**Why this matters:** The proxy is a true passthrough — it never modifies requests or responses. The write pipeline runs in a goroutine after the response is fully delivered, adding exactly zero latency to the developer experience. Knowledge retrieval happens separately through the MCP server, where AI tools explicitly call `memory_search` to access the shared knowledge base. This separation keeps the proxy simple and predictable.
 
 ## MongoDB Atlas: the power multiplier
 

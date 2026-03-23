@@ -17,18 +17,61 @@ const (
 )
 
 // Config holds all daemon configuration.
+// Database role constants.
+const (
+	RoleFull     = "full"      // Read + write
+	RoleReadOnly = "read-only" // Search only, no writes
+)
+
+// DatabaseConfig describes a single team database connection.
+type DatabaseConfig struct {
+	Name     string `yaml:"name"`     // Human label (e.g., "platform", "payments")
+	Database string `yaml:"database"` // MongoDB database name
+	Role     string `yaml:"role"`     // "full" or "read-only"
+}
+
 type Config struct {
-	Port                 int           `yaml:"port"`
-	Mode                 string        `yaml:"mode"`
-	MongoDBAtlasURI      string        `yaml:"mongodb_atlas_uri"`
-	MongoDBDatabase      string        `yaml:"mongodb_database"`
-	ModelPath            string        `yaml:"model_path"`
-	EmbeddingDim         int           `yaml:"embedding_dim"`
-	RetrievalTopK        int           `yaml:"retrieval_top_k"`
-	RetrievalMaxTokens   int           `yaml:"retrieval_max_tokens"`
-	UpstreamAnthropicURL string        `yaml:"upstream_anthropic_url"`
-	AtlasMode            bool          `yaml:"atlas_mode"`
-	Steward              StewardConfig `yaml:"steward"`
+	Port                 int              `yaml:"port"`
+	Mode                 string           `yaml:"mode"`
+	MongoDBAtlasURI      string           `yaml:"mongodb_atlas_uri"`
+	MongoDBDatabase      string           `yaml:"mongodb_database"`
+	Databases            []DatabaseConfig `yaml:"databases,omitempty"`
+	ModelPath            string           `yaml:"model_path"`
+	EmbeddingDim         int              `yaml:"embedding_dim"`
+	RetrievalTopK        int              `yaml:"retrieval_top_k"`
+	RetrievalMaxTokens   int              `yaml:"retrieval_max_tokens"`
+	UpstreamAnthropicURL string           `yaml:"upstream_anthropic_url"`
+	AtlasMode            bool             `yaml:"atlas_mode"`
+	Steward              StewardConfig    `yaml:"steward"`
+}
+
+// ResolvedDatabases returns the effective list of databases.
+// If Databases is empty, falls back to a single entry from MongoDBDatabase.
+func (c *Config) ResolvedDatabases() []DatabaseConfig {
+	if len(c.Databases) > 0 {
+		return c.Databases
+	}
+	name := c.MongoDBDatabase
+	if name == "" {
+		name = "memoryd"
+	}
+	return []DatabaseConfig{{Name: name, Database: name, Role: RoleFull}}
+}
+
+// DefaultDatabase returns the first full-role database name (the write target
+// for proxy capture and default MCP operations).
+func (c *Config) DefaultDatabase() string {
+	for _, db := range c.ResolvedDatabases() {
+		if db.Role == "" || db.Role == RoleFull {
+			return db.Database
+		}
+	}
+	// Fallback: first database regardless of role.
+	dbs := c.ResolvedDatabases()
+	if len(dbs) > 0 {
+		return dbs[0].Database
+	}
+	return "memoryd"
 }
 
 // StewardConfig tunes the background memory consolidation behaviour.

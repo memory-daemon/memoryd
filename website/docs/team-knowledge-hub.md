@@ -50,7 +50,7 @@ The store is tool-agnostic. Team members can use whatever they prefer:
 
 | Team member | Their tool | Integration | What happens |
 |---|---|---|---|
-| Alice | Claude Code | Proxy mode | Every session automatically captured and enriched |
+| Alice | Claude Code | Proxy + MCP | Every session automatically captured; MCP tools for retrieval |
 | Bob | Cursor | MCP server | Agent searches and stores via tool calls |
 | Carol | Windsurf | MCP (read-only) | Consumes team knowledge, doesn't contribute |
 | Dave | Custom pipeline | MCP server | Integrates with internal tooling |

@@ -5,17 +5,17 @@ title: How Knowledge is Retrieved
 
 # How Knowledge is Retrieved
 
-When someone on your team starts an AI coding session, memoryd automatically surfaces relevant knowledge from the shared store — without anyone asking for it.
+Team members access the shared knowledge base through memoryd's **MCP server**. When an AI tool calls `memory_search`, memoryd finds the most relevant knowledge and returns it directly to the tool.
 
 ## The flow
 
 ```
-Team member asks a question → memoryd finds relevant knowledge → context injected into the AI's prompt
+AI tool calls memory_search → memoryd finds relevant knowledge → results returned to the tool
 ```
 
-### 1. Understand the question
+### 1. Understand the query
 
-When a team member's AI tool sends a prompt, memoryd analyzes what they're asking about. It converts the question into a mathematical representation (an embedding) that captures its meaning — not just keywords, but concepts.
+When an AI tool calls `memory_search` with a query, memoryd converts it into a mathematical representation (an embedding) that captures its meaning — not just keywords, but concepts.
 
 This happens locally on every team member's machine using a lightweight model. No data leaves the machine for this step.
 
@@ -32,11 +32,11 @@ With Atlas, the search also filters out low-quality items automatically — nois
 
 See [Hybrid Search](hybrid-search) for how the Atlas search pipeline works.
 
-### 3. Inject context
+### 3. Return results
 
-Relevant knowledge is formatted and injected into the AI's prompt — invisibly. The AI sees context from past sessions (its own and teammates') as part of its instructions. It doesn't know where the context came from, and the team member doesn't need to do anything special.
+The most relevant knowledge items are returned to the AI tool via MCP. The tool receives the actual content — past debugging sessions, architecture decisions, deployment procedures — and can use it as context for its current task.
 
-A token budget (default: ~2048 tokens) prevents context from overwhelming the prompt. The most relevant items are included first; the rest are dropped.
+A result limit (default: 5 items, configurable via `retrieval_top_k`) controls how many items are returned per search.
 
 ### 4. Quality feedback
 

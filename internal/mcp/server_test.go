@@ -53,14 +53,14 @@ func TestToolsList(t *testing.T) {
 	}
 	result := resp.Result.(map[string]any)
 	tools := result["tools"].([]map[string]any)
-	if len(tools) != 9 {
-		t.Fatalf("expected 9 tools, got %d", len(tools))
+	if len(tools) != 10 {
+		t.Fatalf("expected 10 tools, got %d", len(tools))
 	}
 	names := map[string]bool{}
 	for _, tool := range tools {
 		names[tool["name"].(string)] = true
 	}
-	for _, want := range []string{"memory_search", "memory_store", "memory_list", "memory_delete", "source_ingest", "source_list", "source_remove", "quality_stats"} {
+	for _, want := range []string{"memory_search", "memory_store", "memory_list", "memory_delete", "source_ingest", "source_list", "source_remove", "quality_stats", "database_list"} {
 		if !names[want] {
 			t.Errorf("missing tool %s", want)
 		}
@@ -274,19 +274,19 @@ func TestToolsListReadOnly(t *testing.T) {
 	}
 	result := resp.Result.(map[string]any)
 	tools := result["tools"].([]map[string]any)
-	// Read-only should expose only non-write tools: memory_search, memory_list, source_list, quality_stats
-	if len(tools) != 4 {
+	// Read-only should expose only non-write tools: memory_search, memory_list, source_list, quality_stats, database_list
+	if len(tools) != 5 {
 		names := make([]string, len(tools))
 		for i, tool := range tools {
 			names[i], _ = tool["name"].(string)
 		}
-		t.Fatalf("expected 4 tools in read-only mode, got %d: %v", len(tools), names)
+		t.Fatalf("expected 5 tools in read-only mode, got %d: %v", len(tools), names)
 	}
 	names := map[string]bool{}
 	for _, tool := range tools {
 		names[tool["name"].(string)] = true
 	}
-	for _, want := range []string{"memory_search", "memory_list", "source_list", "quality_stats"} {
+	for _, want := range []string{"memory_search", "memory_list", "source_list", "quality_stats", "database_list"} {
 		if !names[want] {
 			t.Errorf("missing read tool %s", want)
 		}

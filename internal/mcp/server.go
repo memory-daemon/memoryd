@@ -146,6 +146,10 @@ func allTools() []map[string]any {
 						"type":        "string",
 						"description": "Natural language query describing what you need to recall",
 					},
+					"database": map[string]any{
+						"type":        "string",
+						"description": "Optional: search only this database (use database_list to see available databases). Omit to search all.",
+					},
 				},
 			},
 		},
@@ -285,6 +289,14 @@ func allTools() []map[string]any {
 				"properties": map[string]any{},
 			},
 		},
+		{
+			"name":        "database_list",
+			"description": "List all connected databases and their roles. Your primary database is read-write; all others are read-only knowledge sources from other teams.",
+			"inputSchema": map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
 	}
 }
 
@@ -335,6 +347,8 @@ func (s *Server) handleToolsCall(id any, params json.RawMessage) *jsonRPCRespons
 		result, isError = s.callSourceRemove(call.Arguments)
 	case "quality_stats":
 		result, isError = s.callQualityStats(call.Arguments)
+	case "database_list":
+		result, isError = s.callDatabaseList(call.Arguments)
 	default:
 		result = fmt.Sprintf("Unknown tool: %s", call.Name)
 		isError = true
@@ -358,7 +372,12 @@ func (s *Server) callSearch(args map[string]any) (string, bool) {
 		return "query is required", true
 	}
 
-	body, _ := json.Marshal(map[string]string{"query": query})
+	payload := map[string]string{"query": query}
+	if db, ok := args["database"].(string); ok && db != "" {
+		payload["database"] = db
+	}
+
+	body, _ := json.Marshal(payload)
 	resp, err := s.client.Post(s.url("/api/search"), "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Sprintf("daemon not reachable: %v (is memoryd running?)", err), true
@@ -616,5 +635,27 @@ func (s *Server) callQualityStats(args map[string]any) (string, bool) {
 	var stats map[string]any
 	json.Unmarshal(data, &stats)
 	out, _ := json.MarshalIndent(stats, "", "  ")
+	return string(out), false
+}
+
+func (s *Server) callDatabaseList(args map[string]any) (string, bool) {
+	resp, err := s.client.Get(s.url("/api/databases"))
+	if err != nil {
+		return fmt.Sprintf("daemon not reachable: %v (is memoryd running?)", err), true
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return fmt.Sprintf("database list failed: %s", string(data)), true
+	}
+
+	var dbs []map[string]any
+	json.Unmarshal(data, &dbs)
+	if len(dbs) == 0 {
+		return "No databases configured.", false
+	}
+
+	out, _ := json.MarshalIndent(dbs, "", "  ")
 	return string(out), false
 }
