@@ -141,14 +141,23 @@ fi
 MEMORYD_BIN="$INSTALL_DIR/memoryd"
 ok "memoryd binary → $MEMORYD_BIN"
 
-# Install macOS menu bar app.
+# Install macOS menu bar app (separate release asset).
 APP_DIR="/Applications"
-if [[ "$OS" == "darwin" && -d "$TMPDIR_DL/Memoryd.app" ]]; then
-  pkill -f "Memoryd.app" 2>/dev/null || true
-  sleep 0.5
-  rm -rf "$APP_DIR/Memoryd.app"
-  mv "$TMPDIR_DL/Memoryd.app" "$APP_DIR/Memoryd.app"
-  ok "Memoryd.app → $APP_DIR/Memoryd.app"
+if [[ "$OS" == "darwin" ]]; then
+  APP_ZIP_NAME="Memoryd-darwin-${ARCH}.zip"
+  APP_ZIP_URL="https://github.com/$REPO/releases/download/${LATEST_TAG}/${APP_ZIP_NAME}"
+  APP_TMPDIR=$(mktemp -d)
+  info "Downloading Memoryd.app..."
+  if $DOWNLOAD_QUIET -o "$APP_TMPDIR/$APP_ZIP_NAME" "$APP_ZIP_URL" 2>/dev/null; then
+    pkill -f "Memoryd.app" 2>/dev/null || true
+    sleep 0.5
+    rm -rf "$APP_DIR/Memoryd.app"
+    unzip -q "$APP_TMPDIR/$APP_ZIP_NAME" -d "$APP_DIR"
+    ok "Memoryd.app → $APP_DIR/Memoryd.app"
+  else
+    info "Memoryd.app not available for $ARCH — menu bar app skipped"
+  fi
+  rm -rf "$APP_TMPDIR"
 fi
 
 trap - EXIT

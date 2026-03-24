@@ -23,7 +23,7 @@ cat > "$APP/Contents/Info.plist" << 'PLIST'
     <key>CFBundleDisplayName</key>
     <string>Memoryd</string>
     <key>CFBundleIdentifier</key>
-    <string>sh.kindling.memoryd</string>
+    <string>io.memorydaemon.memoryd</string>
     <key>CFBundleVersion</key>
     <string>1.0</string>
     <key>CFBundleShortVersionString</key>
