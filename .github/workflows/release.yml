@@ -64,7 +64,6 @@ jobs:
           mkdir -p bundle
           tar -xzf "$ASSET" -C bundle
           cp memoryd-tray-darwin-${{ matrix.goarch }} bundle/memoryd-tray
-          cp bundle/memoryd bundle/memoryd
 
       - name: Build .app bundle
         run: |
