@@ -39,11 +39,11 @@ archives:
 brews:
   - name: memoryd
     repository:
-      owner: kindling-sh
+      owner: jeff-vincent
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
-    homepage: https://github.com/kindling-sh/memoryd
+    homepage: https://github.com/jeff-vincent/memoryd
     description: Persistent memory layer for coding agents
     license: MIT
     install: |
@@ -65,7 +65,7 @@ changelog:
 
 release:
   github:
-    owner: kindling-sh
+    owner: jeff-vincent
     name: memoryd
   draft: false
   prerelease: auto
