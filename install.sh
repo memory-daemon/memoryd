@@ -74,15 +74,12 @@ else
   info "Latest llama.cpp release: $LLAMA_TAG"
 
   if [[ "$OS" == "darwin" ]]; then
-    LLAMA_ASSET="llama-${LLAMA_TAG}-bin-macos-arm64.zip"
+    LLAMA_ASSET="llama-${LLAMA_TAG}-bin-macos-arm64.tar.gz"
     if [[ "$ARCH" == "amd64" ]]; then
-      LLAMA_ASSET="llama-${LLAMA_TAG}-bin-macos-x64.zip"
+      LLAMA_ASSET="llama-${LLAMA_TAG}-bin-macos-x64.tar.gz"
     fi
   elif [[ "$OS" == "linux" ]]; then
-    LLAMA_ASSET="llama-${LLAMA_TAG}-bin-ubuntu-x64.zip"
-    if [[ "$ARCH" == "arm64" ]]; then
-      LLAMA_ASSET="llama-${LLAMA_TAG}-bin-ubuntu-arm64.zip"
-    fi
+    LLAMA_ASSET="llama-${LLAMA_TAG}-bin-ubuntu-x64.tar.gz"
   else
     fail "No prebuilt llama.cpp for $OS/$ARCH"
     exit 1
@@ -91,11 +88,12 @@ else
   LLAMA_URL="https://github.com/$LLAMA_REPO/releases/download/${LLAMA_TAG}/${LLAMA_ASSET}"
   LLAMA_TMPDIR=$(mktemp -d)
   if ! $DOWNLOAD_PROGRESS -o "$LLAMA_TMPDIR/$LLAMA_ASSET" "$LLAMA_URL" 2>&1; then
-    fail "Could not download llama.cpp — try: brew install llama.cpp"
+    fail "Could not download llama.cpp from $LLAMA_URL"
     rm -rf "$LLAMA_TMPDIR"
     exit 1
   fi
-  unzip -q "$LLAMA_TMPDIR/$LLAMA_ASSET" -d "$LLAMA_TMPDIR/llama"
+  mkdir -p "$LLAMA_TMPDIR/llama"
+  tar -xzf "$LLAMA_TMPDIR/$LLAMA_ASSET" -C "$LLAMA_TMPDIR/llama"
 
   # Find llama-server in the extracted archive.
   LLAMA_SERVER=$(find "$LLAMA_TMPDIR/llama" -name "llama-server" -type f | head -1)
