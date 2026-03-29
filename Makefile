@@ -31,11 +31,9 @@ release: clean
 	GOOS=darwin GOARCH=arm64 go build -ldflags "$(LDFLAGS)" -o dist/darwin-arm64/memoryd-tray ./cmd/memoryd-tray
 	./scripts/build-release-app.sh dist/darwin-arm64
 	tar -czf dist/memoryd_$(VERSION)_darwin_arm64.tar.gz -C dist/darwin-arm64 memoryd Memoryd.app
-	# macOS AMD64
+	# macOS AMD64 (CLI only — tray requires native CGo)
 	GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/darwin-amd64/memoryd ./cmd/memoryd
-	GOOS=darwin GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/darwin-amd64/memoryd-tray ./cmd/memoryd-tray
-	./scripts/build-release-app.sh dist/darwin-amd64
-	tar -czf dist/memoryd_$(VERSION)_darwin_amd64.tar.gz -C dist/darwin-amd64 memoryd Memoryd.app
+	tar -czf dist/memoryd_$(VERSION)_darwin_amd64.tar.gz -C dist/darwin-amd64 memoryd
 	# Linux AMD64
 	GOOS=linux GOARCH=amd64 go build -ldflags "$(LDFLAGS)" -o dist/linux-amd64/memoryd ./cmd/memoryd
 	tar -czf dist/memoryd_$(VERSION)_linux_amd64.tar.gz -C dist/linux-amd64 memoryd

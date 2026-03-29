@@ -283,10 +283,10 @@ type dashResp struct {
 		Threshold  int64 `json:"threshold"`
 	} `json:"quality"`
 	Steward struct {
-		Active  bool `json:"active"`
-		Scored  int  `json:"scored"`
-		Pruned  int  `json:"pruned"`
-		Merged  int  `json:"merged"`
+		Active bool `json:"active"`
+		Scored int  `json:"scored"`
+		Pruned int  `json:"pruned"`
+		Merged int  `json:"merged"`
 	} `json:"steward"`
 }
 
@@ -719,12 +719,12 @@ func main() {
 	baseURL := flag.String("base-url", "http://127.0.0.1:7432", "memoryd HTTP address")
 	outputFile := flag.String("output", "", "write markdown report to this file (default: stdout)")
 	noCleanup := flag.Bool("no-cleanup", false, "retain eval memories after the run")
-	hfMode    := flag.Bool("hf", false, "run HuggingFace pipeline optimiser instead of hardcoded corpus")
+	hfMode := flag.Bool("hf", false, "run HuggingFace pipeline optimiser instead of hardcoded corpus")
 	directMode := flag.Bool("direct", false, "feed HF rows through /api/ingest (full pipeline including SynthesizeQA)")
 	benchMode := flag.Bool("benchmark", false, "comprehensive HF benchmark with cross-tabulation and JSONL output")
 	jsonlPath := flag.String("jsonl", "", "path to write per-row JSONL results (--benchmark mode)")
-	dataDir   := flag.String("data-dir", "", "path to directory with dataset.jsonl (skip HF API download)")
-	sampleN   := flag.Int("sample", 300, "number of HF rows to fetch (--hf / --direct / --benchmark mode, default 300)")
+	dataDir := flag.String("data-dir", "", "path to directory with dataset.jsonl (skip HF API download)")
+	sampleN := flag.Int("sample", 300, "number of HF rows to fetch (--hf / --direct / --benchmark mode, default 300)")
 	concurrency := flag.Int("concurrency", 4, "parallel workers for --direct / --benchmark mode")
 	flag.Parse()
 

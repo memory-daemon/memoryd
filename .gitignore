@@ -6,6 +6,8 @@ dist/
 /validate
 stress
 models/*.gguf
+*.parquet
+data/dataset.jsonl
 .memoryd/
 website/node_modules/
 website/build/

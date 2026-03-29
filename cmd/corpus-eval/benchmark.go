@@ -5,10 +5,10 @@
 // Feeds N rows from nlile/misc-merged-claude-code-traces-v1 through the live
 // /api/ingest endpoint and records detailed per-row results. Produces:
 //
-//   1. A JSONL file with every row's classification, pipeline stage, latency,
-//      input/output lengths, and synthesis entry text.
-//   2. A markdown report with cross-tabulations, distributions, and search
-//      quality probes — designed for "analyzing every which way."
+//  1. A JSONL file with every row's classification, pipeline stage, latency,
+//     input/output lengths, and synthesis entry text.
+//  2. A markdown report with cross-tabulations, distributions, and search
+//     quality probes — designed for "analyzing every which way."
 //
 // Usage:
 //
@@ -38,21 +38,21 @@ import (
 // ---------------------------------------------------------------------------
 
 type benchRow struct {
-	Index              int     `json:"index"`
-	Classification     string  `json:"classification"`       // noise | explanation | substantive
-	Stage              string  `json:"stage"`                 // pre_filter | synthesizer_skip | stored | noise_filtered | error
-	Stored             int     `json:"stored"`                // 0 or 1+
-	LatencyMs          int64   `json:"latency_ms"`
-	UserPromptLen      int     `json:"user_prompt_len"`
-	AssistantLen       int     `json:"assistant_len"`
-	EntryLen           int     `json:"entry_len"`             // length of synthesized entry (0 if not stored)
-	Summary            string  `json:"summary"`               // WriteResult.Summary()
-	WritePipeStored    int     `json:"wp_stored"`
-	WritePipeDupes     int     `json:"wp_dupes"`
-	WritePipeFiltered  int     `json:"wp_filtered"`
-	WritePipeExtended  int     `json:"wp_extended"`
-	WritePipeMerged    int     `json:"wp_merged"`
-	Error              string  `json:"error,omitempty"`
+	Index             int    `json:"index"`
+	Classification    string `json:"classification"` // noise | explanation | substantive
+	Stage             string `json:"stage"`          // pre_filter | synthesizer_skip | stored | noise_filtered | error
+	Stored            int    `json:"stored"`         // 0 or 1+
+	LatencyMs         int64  `json:"latency_ms"`
+	UserPromptLen     int    `json:"user_prompt_len"`
+	AssistantLen      int    `json:"assistant_len"`
+	EntryLen          int    `json:"entry_len"` // length of synthesized entry (0 if not stored)
+	Summary           string `json:"summary"`   // WriteResult.Summary()
+	WritePipeStored   int    `json:"wp_stored"`
+	WritePipeDupes    int    `json:"wp_dupes"`
+	WritePipeFiltered int    `json:"wp_filtered"`
+	WritePipeExtended int    `json:"wp_extended"`
+	WritePipeMerged   int    `json:"wp_merged"`
+	Error             string `json:"error,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
