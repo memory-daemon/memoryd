@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -109,197 +111,272 @@ func startCmd() *cobra.Command {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 
-			// 1. Connect to MongoDB — build entries for each configured database
-			databases := cfg.ResolvedDatabases()
-			log.Printf("Connecting to %d database(s)...", len(databases))
+			// Track MongoDB connection status for the health endpoint.
+			var mongoStatus atomic.Value
+			mongoStatus.Store("connecting")
+			mongoStatusFn := func() string { return mongoStatus.Load().(string) }
 
-			var entries []store.DatabaseEntry
-			for _, dbCfg := range databases {
-				if !dbCfg.IsEnabled() {
-					log.Printf("  [%s] skipped (disabled)", dbCfg.Name)
-					continue
-				}
-
-				// Use the database-specific URI if set, otherwise fall back to primary.
-				uri := dbCfg.URI
-				if uri == "" {
-					uri = cfg.MongoDBAtlasURI
-				}
-
-				var ms *store.MongoStore
-				var ss store.Store
-				if cfg.AtlasMode {
-					atlas, err := store.NewAtlasStore(ctx, uri, dbCfg.Database)
-					if err != nil {
-						return fmt.Errorf("connecting to database %q: %w", dbCfg.Name, err)
+			// connectMongo attempts to connect to all configured databases.
+			// Returns nil entries and an error if the connection fails.
+			connectMongo := func() ([]store.DatabaseEntry, error) {
+				databases := cfg.ResolvedDatabases()
+				var entries []store.DatabaseEntry
+				for _, dbCfg := range databases {
+					if !dbCfg.IsEnabled() {
+						continue
 					}
-					ms = atlas.MongoStore
-					ss = atlas
-				} else {
-					var err error
-					ms, err = store.NewMongoStore(ctx, uri, dbCfg.Database)
-					if err != nil {
-						return fmt.Errorf("connecting to database %q: %w", dbCfg.Name, err)
+					uri := dbCfg.URI
+					if uri == "" {
+						uri = cfg.MongoDBAtlasURI
 					}
-					ss = ms
+					var ms *store.MongoStore
+					var ss store.Store
+					if cfg.AtlasMode {
+						atlas, err := store.NewAtlasStore(ctx, uri, dbCfg.Database)
+						if err != nil {
+							return nil, fmt.Errorf("database %q: %w", dbCfg.Name, err)
+						}
+						ms = atlas.MongoStore
+						ss = atlas
+					} else {
+						var err error
+						ms, err = store.NewMongoStore(ctx, uri, dbCfg.Database)
+						if err != nil {
+							return nil, fmt.Errorf("database %q: %w", dbCfg.Name, err)
+						}
+						ss = ms
+					}
+					role := dbCfg.Role
+					if role == "" {
+						role = config.RoleFull
+					}
+					log.Printf("  [%s] database=%s role=%s atlas=%v", dbCfg.Name, dbCfg.Database, role, cfg.AtlasMode)
+					entries = append(entries, store.DatabaseEntry{
+						Name: dbCfg.Name, Database: dbCfg.Database,
+						Role: role, URI: dbCfg.URI,
+						Store: ms, SearchStore: ss, Mongo: ms,
+					})
 				}
-				role := dbCfg.Role
-				if role == "" {
-					role = config.RoleFull
-				}
-				log.Printf("  [%s] database=%s role=%s atlas=%v", dbCfg.Name, dbCfg.Database, role, cfg.AtlasMode)
-				entries = append(entries, store.DatabaseEntry{
-					Name:        dbCfg.Name,
-					Database:    dbCfg.Database,
-					Role:        role,
-					URI:         dbCfg.URI,
-					Store:       ms,
-					SearchStore: ss,
-					Mongo:       ms,
-				})
+				return entries, nil
 			}
 
-			multi, err := store.NewMultiStore(entries)
-			if err != nil {
-				return fmt.Errorf("building multi-store: %w", err)
-			}
-			defer multi.Close()
-
-			primary := multi.Primary()
-
-			// Verify vector index exists on primary database.
-			if err := primary.Mongo.CheckVectorIndex(ctx); err != nil {
-				log.Printf("WARNING: %v", err)
-				log.Println("memoryd will start, but vector search will not work until the index is created.")
+			// Try initial connection.
+			log.Printf("Connecting to %d database(s)...", len(cfg.ResolvedDatabases()))
+			entries, connErr := connectMongo()
+			if connErr != nil {
+				log.Printf("ERROR: MongoDB is not reachable: %v", connErr)
+				log.Println("  ╔══════════════════════════════════════════════════════════════╗")
+				log.Println("  ║  MongoDB is required. memoryd will keep retrying.           ║")
+				log.Println("  ║                                                              ║")
+				log.Println("  ║  For local development:                                      ║")
+				log.Println("  ║    1. Start Docker Desktop                                   ║")
+				log.Println("  ║    2. docker start memoryd-mongo                             ║")
+				log.Println("  ║       (or: docker run -d --name memoryd-mongo \\              ║")
+				log.Println("  ║         -p 27017:27017 mongodb/mongodb-atlas-local:8.0)      ║")
+				log.Println("  ║                                                              ║")
+				log.Println("  ║  For Atlas: check your connection string in config.yaml      ║")
+				log.Println("  ╚══════════════════════════════════════════════════════════════╝")
+				mongoStatus.Store("disconnected")
 			} else {
-				log.Println("  vector_index verified")
+				mongoStatus.Store("connected")
 			}
 
-			// 2. Start the embedding model
-			log.Println("Loading embedding model...")
-			emb, err := embedding.NewLlamaEmbedder(cfg.ModelPath, cfg.EmbeddingDim)
-			if err != nil {
-				return err
-			}
-			defer emb.Close()
-
-			// 3. Build pipelines
-			// Read pipeline uses MultiStore (fan-out search across all databases).
-			// Write pipeline uses primary store (default write target).
-			qt := quality.NewTracker(primary.Mongo, quality.DefaultThreshold)
-			read := pipeline.NewReadPipeline(emb, multi, cfg, pipeline.WithQualityTracker(qt))
-
-			scorer, err := quality.NewContentScorerWithProtos(ctx, emb, cfg.Pipeline.QualityProtos, cfg.Pipeline.NoiseProtos)
-			if err != nil {
-				log.Printf("warning: content scorer unavailable, chunks will not be quality-scored: %v", err)
-			}
-
-			// Build LLM synthesizer when explicitly enabled in config AND
-			// an Anthropic API key is available (keychain or env var). Without
-			// both, topic groups fall back to "\n\n" joining and Q&A pairing
-			// stores plain responses.
-			var synth *synthesizer.Synthesizer
-			if cfg.LLMSynthesis {
-				apiKey := config.GetAnthropicAPIKey()
-				synth = synthesizer.New(apiKey, cfg.UpstreamAnthropicURL)
-				if synth.Available() {
-					log.Printf("LLM synthesis enabled (model: claude-haiku-4-5-20251001)")
-				} else {
-					log.Printf("LLM synthesis: enabled in config but no Anthropic API key found — disabled")
-					log.Printf("  Set via: tray app → Set Anthropic API Key, or ANTHROPIC_API_KEY env var")
-				}
-			} else {
-				synth = synthesizer.New("", "")
-				log.Printf("LLM synthesis disabled (set llm_synthesis: true in config to enable)")
-			}
-
-			write := pipeline.NewWritePipeline(emb, primary.Store,
-				pipeline.WithContentScorer(scorer),
-				pipeline.WithSynthesizer(synth),
-				pipeline.WithPipelineConfig(cfg.Pipeline),
+			// wiredMu protects the full-pipeline state so the background retry
+			// goroutine can safely swap it in after a delayed connection.
+			var wiredMu sync.Mutex
+			var (
+				multi    *store.MultiStore
+				emb      embedding.Embedder
+				read     *pipeline.ReadPipeline
+				write    *pipeline.WritePipeline
+				qt       *quality.Tracker
+				rejLog   *rejection.Store
+				ing      *ingest.Ingester
+				stewards []*steward.Steward
+				synth    *synthesizer.Synthesizer
 			)
 
-			// 5a. Open rejection store — bounded ring buffer persisted across
-			// restarts. Accumulated entries are used as learned noise prototypes
-			// to keep the ContentScorer calibrated to real rejection patterns.
-			rejStorePath := filepath.Join(config.Dir(), "rejection_log.jsonl")
-			rejLog, err := rejection.Open(rejStorePath, 0) // 0 = DefaultMaxSize (500)
-			if err != nil {
-				log.Printf("warning: could not open rejection store: %v", err)
-			} else {
-				log.Printf("rejection store: %s (%d entries)", rejStorePath, rejLog.Len())
+			// wirePipeline sets up the full processing pipeline once MongoDB is connected.
+			wirePipeline := func(entries []store.DatabaseEntry) error {
+				var err error
+				multi, err = store.NewMultiStore(entries)
+				if err != nil {
+					return fmt.Errorf("building multi-store: %w", err)
+				}
+				primary := multi.Primary()
+
+				if err := primary.Mongo.CheckVectorIndex(ctx); err != nil {
+					log.Printf("WARNING: %v", err)
+					log.Println("memoryd will start, but vector search will not work until the index is created.")
+				} else {
+					log.Println("  vector_index verified")
+				}
+
+				log.Println("Loading embedding model...")
+				emb, err = embedding.NewLlamaEmbedder(cfg.ModelPath, cfg.EmbeddingDim)
+				if err != nil {
+					return err
+				}
+
+				qt = quality.NewTracker(primary.Mongo, quality.DefaultThreshold)
+				read = pipeline.NewReadPipeline(emb, multi, cfg, pipeline.WithQualityTracker(qt))
+
+				scorer, err := quality.NewContentScorerWithProtos(ctx, emb, cfg.Pipeline.QualityProtos, cfg.Pipeline.NoiseProtos)
+				if err != nil {
+					log.Printf("warning: content scorer unavailable, chunks will not be quality-scored: %v", err)
+				}
+
+				if cfg.LLMSynthesis {
+					apiKey := config.GetAnthropicAPIKey()
+					synth = synthesizer.New(apiKey, cfg.UpstreamAnthropicURL)
+					if synth.Available() {
+						log.Printf("LLM synthesis enabled (model: claude-haiku-4-5-20251001)")
+					} else {
+						log.Printf("LLM synthesis: enabled in config but no Anthropic API key found — disabled")
+					}
+				} else {
+					synth = synthesizer.New("", "")
+					log.Printf("LLM synthesis disabled (set llm_synthesis: true in config to enable)")
+				}
+
+				write = pipeline.NewWritePipeline(emb, primary.Store,
+					pipeline.WithContentScorer(scorer),
+					pipeline.WithSynthesizer(synth),
+					pipeline.WithPipelineConfig(cfg.Pipeline),
+				)
+
+				rejStorePath := filepath.Join(config.Dir(), "rejection_log.jsonl")
+				rejLog, err = rejection.Open(rejStorePath, 0)
+				if err != nil {
+					log.Printf("warning: could not open rejection store: %v", err)
+				} else {
+					log.Printf("rejection store: %s (%d entries)", rejStorePath, rejLog.Len())
+				}
+
+				if rejLog != nil {
+					go func() {
+						if rejLog.Len() > 0 {
+							texts := rejLog.Texts()
+							if s, err := quality.NewContentScorerFromRejections(ctx, emb, texts, cfg.Pipeline.QualityProtos); err == nil {
+								write.UpdateScorer(s)
+								log.Printf("[rejection] scorer seeded with %d noise prototypes from stored rejections", len(texts))
+							}
+						}
+						for {
+							select {
+							case <-ctx.Done():
+								return
+							case _, ok := <-rejLog.RebuildCh():
+								if !ok {
+									return
+								}
+								texts := rejLog.Texts()
+								s, err := quality.NewContentScorerFromRejections(ctx, emb, texts, cfg.Pipeline.QualityProtos)
+								if err != nil {
+									log.Printf("[rejection] scorer rebuild error: %v", err)
+									continue
+								}
+								write.UpdateScorer(s)
+								log.Printf("[rejection] scorer rebuilt with %d noise prototypes", len(texts))
+							}
+						}
+					}()
+				}
+
+				ing = ingest.NewIngester(emb, primary.Mongo, primary.Mongo)
+
+				stwCfg := steward.Config{
+					Interval:         cfg.Steward.Interval(),
+					PruneThreshold:   cfg.Steward.PruneThreshold,
+					PruneGracePeriod: cfg.Steward.GracePeriod(),
+					DecayHalfLife:    cfg.Steward.DecayHalfLife(),
+					MergeThreshold:   cfg.Steward.MergeThreshold,
+					BatchSize:        cfg.Steward.BatchSize,
+				}
+				for _, e := range multi.Entries() {
+					if !e.IsWritable() {
+						continue
+					}
+					stw := steward.New(stwCfg, e.Mongo, emb)
+					stw.Start(ctx)
+					stewards = append(stewards, stw)
+					log.Printf("  [%s] steward started", e.Name)
+				}
+
+				return nil
 			}
 
-			// 5b. Scorer rebuild goroutine: when the rejection store accumulates
-			// enough new entries it signals on RebuildCh. Re-embed the stored
-			// assistant texts as noise prototypes and hot-swap the scorer.
-			if rejLog != nil {
+			// Wire up the pipeline if MongoDB connected on first try.
+			if connErr == nil {
+				if err := wirePipeline(entries); err != nil {
+					return err
+				}
+			}
+
+			// If MongoDB failed, retry in the background.
+			if connErr != nil {
 				go func() {
-					// Seed scorer from existing entries on startup.
-					if rejLog.Len() > 0 {
-						texts := rejLog.Texts()
-						if s, err := quality.NewContentScorerFromRejections(ctx, emb, texts, cfg.Pipeline.QualityProtos); err == nil {
-							write.UpdateScorer(s)
-							log.Printf("[rejection] scorer seeded with %d noise prototypes from stored rejections", len(texts))
-						}
-					}
+					backoff := 10 * time.Second
+					const maxBackoff = 60 * time.Second
 					for {
 						select {
 						case <-ctx.Done():
 							return
-						case _, ok := <-rejLog.RebuildCh():
-							if !ok {
-								return
-							}
-							texts := rejLog.Texts()
-							s, err := quality.NewContentScorerFromRejections(ctx, emb, texts, cfg.Pipeline.QualityProtos)
-							if err != nil {
-								log.Printf("[rejection] scorer rebuild error: %v", err)
-								continue
-							}
-							write.UpdateScorer(s)
-							log.Printf("[rejection] scorer rebuilt with %d noise prototypes", len(texts))
+						case <-time.After(backoff):
 						}
+
+						log.Println("Retrying MongoDB connection...")
+						entries, err := connectMongo()
+						if err != nil {
+							log.Printf("  MongoDB still unreachable: %v", err)
+							if backoff < maxBackoff {
+								backoff = backoff * 2
+								if backoff > maxBackoff {
+									backoff = maxBackoff
+								}
+							}
+							continue
+						}
+
+						log.Println("MongoDB connected!")
+						mongoStatus.Store("connected")
+
+						wiredMu.Lock()
+						if wErr := wirePipeline(entries); wErr != nil {
+							log.Printf("ERROR: failed to wire pipeline after connect: %v", wErr)
+							wiredMu.Unlock()
+							continue
+						}
+						wiredMu.Unlock()
+
+						log.Println("Full pipeline active — memoryd is fully operational")
+						return
 					}
 				}()
 			}
 
-			// 5c. Build ingester (operates on primary database)
-			ing := ingest.NewIngester(emb, primary.Mongo, primary.Mongo)
+			// Build server options — may be nil if MongoDB isn't connected yet.
+			// The proxy handles nil store gracefully (no dashboard/API, passthrough only).
+			var serverOpts []proxy.ServerOption
+			serverOpts = append(serverOpts, proxy.WithMongoStatus(mongoStatusFn))
 
-			// 6. Start a steward for each writable database
-			stwCfg := steward.Config{
-				Interval:         cfg.Steward.Interval(),
-				PruneThreshold:   cfg.Steward.PruneThreshold,
-				PruneGracePeriod: cfg.Steward.GracePeriod(),
-				DecayHalfLife:    cfg.Steward.DecayHalfLife(),
-				MergeThreshold:   cfg.Steward.MergeThreshold,
-				BatchSize:        cfg.Steward.BatchSize,
-			}
-			var stewards []*steward.Steward
-			for _, e := range multi.Entries() {
-				if !e.IsWritable() {
-					continue
+			wiredMu.Lock()
+			if multi != nil {
+				serverOpts = append(serverOpts,
+					proxy.WithStore(multi),
+					proxy.WithSourceStore(multi.Primary().Mongo),
+					proxy.WithEmbedder(emb),
+					proxy.WithSynthesizer(synth),
+					proxy.WithRejectionLog(rejLog),
+					proxy.WithQuality(qt),
+					proxy.WithIngester(ing),
+				)
+				if len(stewards) > 0 {
+					serverOpts = append(serverOpts, proxy.WithStewardStats(&stewardAdapter{stewards: stewards}))
 				}
-				stw := steward.New(stwCfg, e.Mongo, emb)
-				stw.Start(ctx)
-				stewards = append(stewards, stw)
-				log.Printf("  [%s] steward started", e.Name)
 			}
+			wiredMu.Unlock()
 
-			// 7. Start the proxy (after stewards, so we can expose their stats)
-			serverOpts := []proxy.ServerOption{
-				proxy.WithStore(multi),
-				proxy.WithSourceStore(primary.Mongo),
-				proxy.WithIngester(ing),
-				proxy.WithQuality(qt),
-				proxy.WithEmbedder(emb),
-				proxy.WithSynthesizer(synth),
-				proxy.WithRejectionLog(rejLog),
-			}
-			if len(stewards) > 0 {
-				serverOpts = append(serverOpts, proxy.WithStewardStats(&stewardAdapter{stewards: stewards}))
-			}
 			srv := proxy.NewServer(cfg, version, read, write, serverOpts...)
 
 			// Graceful shutdown on SIGINT / SIGTERM
@@ -310,28 +387,23 @@ func startCmd() *cobra.Command {
 				<-sigCh
 				log.Println("Shutting down...")
 
-				// 1. Stop accepting new requests; drain in-flight with a deadline.
 				shutCtx, shutCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer shutCancel()
 				if err := srv.Shutdown(shutCtx); err != nil {
 					log.Printf("server shutdown error: %v", err)
 				}
 
-				// 2. Stop background workers.
 				for _, stw := range stewards {
 					stw.Stop()
 				}
-				cancel() // unblocks the scorer rebuild goroutine via ctx.Done()
+				cancel()
 
-				// 3. Flush rejection log.
 				if rejLog != nil {
 					rejLog.Close()
 				}
-
-				// 4. Kill embedding subprocess explicitly so it doesn't outlive us.
-				// emb.Close() is also deferred, but an explicit call here ensures the
-				// subprocess is reaped even if the tray sends SIGKILL before defers run.
-				emb.Close()
+				if emb != nil {
+					emb.Close()
+				}
 			}()
 
 			return srv.Start()

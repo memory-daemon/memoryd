@@ -42,6 +42,9 @@ func onReady() {
 	mStatus := systray.AddMenuItem("Status: checking...", "Daemon status")
 	mStatus.Disable()
 
+	mMongo := systray.AddMenuItem("MongoDB: checking...", "MongoDB connection status")
+	mMongo.Disable()
+
 	systray.AddSeparator()
 
 	// --- Mode submenu ---
@@ -90,6 +93,7 @@ func onReady() {
 	// Poll daemon health every 3 seconds.
 	running := false
 	synthActive := false
+	mongoConnected := false
 	go func() {
 		for {
 			health := getHealth(port)
@@ -108,6 +112,22 @@ func onReady() {
 				}
 			}
 
+			// Track MongoDB connection status.
+			if ok {
+				mongoStr, _ := health["mongodb"].(string)
+				newMongoConnected := mongoStr == "connected"
+				if newMongoConnected != mongoConnected {
+					mongoConnected = newMongoConnected
+					if mongoConnected {
+						mMongo.SetTitle("MongoDB: ✅ connected")
+					} else if mongoStr == "connecting" {
+						mMongo.SetTitle("MongoDB: 🔄 connecting...")
+					} else {
+						mMongo.SetTitle("MongoDB: ❌ disconnected — start MongoDB to continue")
+					}
+				}
+			}
+
 			if ok != running {
 				running = ok
 				if running {
@@ -117,10 +137,16 @@ func onReady() {
 					}
 					mStatus.SetTitle(subtitle)
 					mToggle.SetTitle("Stop")
-					systray.SetTitle("M●")
+					if mongoConnected {
+						systray.SetTitle("M●")
+					} else {
+						systray.SetTitle("M⚠")
+					}
 				} else {
 					synthActive = false
+					mongoConnected = false
 					mStatus.SetTitle("Status: ○ stopped")
+					mMongo.SetTitle("MongoDB: —")
 					mToggle.SetTitle("Start")
 					systray.SetTitle("M○")
 				}
@@ -144,8 +170,10 @@ func onReady() {
 			if running {
 				stopDaemon()
 				running = false
+				mongoConnected = false
 				mToggle.SetTitle("Start")
 				mStatus.SetTitle("Status: ○ stopped")
+				mMongo.SetTitle("MongoDB: —")
 				systray.SetTitle("M○")
 			} else {
 				setStartGrace()
@@ -153,6 +181,7 @@ func onReady() {
 				running = true
 				mToggle.SetTitle("Stop")
 				mStatus.SetTitle("Status: ● running on port " + fmt.Sprintf("%d", port))
+				mMongo.SetTitle("MongoDB: 🔄 connecting...")
 				systray.SetTitle("M●")
 			}
 

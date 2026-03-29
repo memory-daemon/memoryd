@@ -19,12 +19,13 @@ import (
 
 // Server is the memoryd HTTP proxy.
 type Server struct {
-	httpServer *http.Server
-	addr       string
-	token      string
-	version    string
-	mode       string
-	startedAt  time.Time
+	httpServer  *http.Server
+	addr        string
+	token       string
+	version     string
+	mode        string
+	startedAt   time.Time
+	mongoStatus func() string // optional: returns "connected", "connecting", etc.
 }
 
 type serverOpts struct {
@@ -36,6 +37,7 @@ type serverOpts struct {
 	stewardStats StewardStatsProvider
 	synth        *synthesizer.Synthesizer
 	rejLog       *rejection.Store
+	mongoStatus  func() string
 }
 
 // StewardStatsProvider exposes steward sweep results to the dashboard.
@@ -94,6 +96,11 @@ func WithRejectionLog(rl *rejection.Store) ServerOption {
 	return func(o *serverOpts) { o.rejLog = rl }
 }
 
+// WithMongoStatus provides a callback that returns the current MongoDB connection status.
+func WithMongoStatus(fn func() string) ServerOption {
+	return func(o *serverOpts) { o.mongoStatus = fn }
+}
+
 // NewServer wires up all endpoints and returns a ready-to-start server.
 func NewServer(cfg *config.Config, version string, read *pipeline.ReadPipeline, write *pipeline.WritePipeline, opts ...ServerOption) *Server {
 	var so serverOpts
@@ -113,14 +120,20 @@ func NewServer(cfg *config.Config, version string, read *pipeline.ReadPipeline, 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(map[string]any{
+		resp := map[string]any{
 			"status":     "ok",
 			"version":    version,
 			"mode":       mode,
 			"synthesis":  synthAvail,
 			"started_at": startedAt.UTC().Format(time.RFC3339),
 			"uptime_s":   int(time.Since(startedAt).Seconds()),
-		})
+		}
+		if so.mongoStatus != nil {
+			resp["mongodb"] = so.mongoStatus()
+		} else {
+			resp["mongodb"] = "connected"
+		}
+		json.NewEncoder(w).Encode(resp)
 	})
 
 	if so.store != nil {
@@ -143,11 +156,12 @@ func NewServer(cfg *config.Config, version string, read *pipeline.ReadPipeline, 
 			Addr:    addr,
 			Handler: handler,
 		},
-		addr:      addr,
-		token:     token,
-		version:   version,
-		mode:      mode,
-		startedAt: startedAt,
+		addr:        addr,
+		token:       token,
+		version:     version,
+		mode:        mode,
+		startedAt:   startedAt,
+		mongoStatus: so.mongoStatus,
 	}
 }
 

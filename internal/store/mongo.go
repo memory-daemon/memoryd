@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"log"
 	"regexp"
 	"time"
 
@@ -21,15 +22,39 @@ type MongoStore struct {
 	pages      *mongo.Collection
 }
 
-// NewMongoStore connects to Atlas and returns a ready store.
+// NewMongoStore connects to MongoDB and returns a ready store.
+// It retries with exponential backoff if the database is temporarily unreachable.
 func NewMongoStore(ctx context.Context, uri, database string) (*MongoStore, error) {
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
+	const maxRetries = 5
+
+	opts := options.Client().ApplyURI(uri).
+		SetServerSelectionTimeout(5 * time.Second).
+		SetConnectTimeout(5 * time.Second)
+
+	client, err := mongo.Connect(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to Atlas: %w", err)
 	}
 
-	if err := client.Ping(ctx, nil); err != nil {
-		return nil, fmt.Errorf("pinging Atlas: %w", err)
+	// Retry ping with exponential backoff: 1s, 2s, 4s, 8s, 16s (~31s total).
+	var pingErr error
+	for attempt := range maxRetries {
+		pingErr = client.Ping(ctx, nil)
+		if pingErr == nil {
+			break
+		}
+		if attempt < maxRetries-1 {
+			backoff := time.Duration(1<<uint(attempt)) * time.Second
+			log.Printf("  MongoDB unreachable (attempt %d/%d), retrying in %v...", attempt+1, maxRetries, backoff)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil, fmt.Errorf("pinging Atlas: %w", ctx.Err())
+			}
+		}
+	}
+	if pingErr != nil {
+		return nil, fmt.Errorf("pinging Atlas after %d attempts: %w", maxRetries, pingErr)
 	}
 
 	db := client.Database(database)
