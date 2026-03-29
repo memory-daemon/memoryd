@@ -89,7 +89,7 @@ func scenarioStewardDecayMonotonic(ctx context.Context) error {
 
 	content := "The memoryd quality steward sweeps hourly, scoring and pruning memories based on age and retrieval frequency using exponential decay."
 	vec, _ := emb.Embed(ctx, content)
-	st1.Insert(ctx, store.Memory{
+	_ = st1.Insert(ctx, store.Memory{
 		ID:        primitive.NewObjectID(),
 		Content:   content,
 		Embedding: vec,
@@ -110,7 +110,7 @@ func scenarioStewardDecayMonotonic(ctx context.Context) error {
 	swd2 := steward.New(cfg, st2, emb)
 
 	// Created halfLifeDays ago — exactly at the half-life boundary.
-	st2.Insert(ctx, store.Memory{
+	_ = st2.Insert(ctx, store.Memory{
 		ID:        primitive.NewObjectID(),
 		Content:   content,
 		Embedding: vec,

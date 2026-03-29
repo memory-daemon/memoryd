@@ -136,10 +136,7 @@ func scenarioWriteResultCounting(ctx context.Context) error {
 
 	// Third: re-store the same unique content — should be deduped.
 	r3 := wp.ProcessFiltered(unique, "validate", nil)
-	if r3.Duplicates == 0 && r3.Stored > 0 {
-		// Stored again — that's OK only if it somehow chunked differently.
-		// Just ensure total count doesn't grow unboundedly.
-	}
+	// Stored again is OK if chunked differently; just ensure count doesn't grow unboundedly.
 	if r3.Duplicates == 0 && r3.Stored == 0 && r3.Filtered == 0 {
 		return fmt.Errorf("third write should produce at least one outcome (stored/filtered/deduped)")
 	}

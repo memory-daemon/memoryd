@@ -214,7 +214,7 @@ func (e *LlamaEmbedder) Close() error {
 		pgid, pgErr := syscall.Getpgid(e.cmd.Process.Pid)
 		if pgErr == nil {
 			// Negative PID = signal the process group.
-			syscall.Kill(-pgid, syscall.SIGTERM)
+			_ = syscall.Kill(-pgid, syscall.SIGTERM)
 		} else {
 			e.cmd.Process.Signal(syscall.SIGTERM)
 		}
@@ -229,7 +229,7 @@ func (e *LlamaEmbedder) Close() error {
 		case <-done:
 		case <-time.After(3 * time.Second):
 			if pgErr == nil {
-				syscall.Kill(-pgid, syscall.SIGKILL)
+				_ = syscall.Kill(-pgid, syscall.SIGKILL)
 			} else {
 				e.cmd.Process.Kill()
 			}

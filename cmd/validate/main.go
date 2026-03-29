@@ -305,7 +305,7 @@ func scenarioPruning(ctx context.Context) error {
 	}
 	for _, content := range groupA {
 		vec, _ := emb.Embed(ctx, content)
-		st.Insert(ctx, store.Memory{
+		_ = st.Insert(ctx, store.Memory{
 			ID:        primitive.NewObjectID(),
 			Content:   content,
 			Embedding: vec,
@@ -326,7 +326,7 @@ func scenarioPruning(ctx context.Context) error {
 	}
 	for i, content := range groupB {
 		vec, _ := emb.Embed(ctx, content)
-		st.Insert(ctx, store.Memory{
+		_ = st.Insert(ctx, store.Memory{
 			ID:            primitive.NewObjectID(),
 			Content:       content,
 			Embedding:     vec,
@@ -347,7 +347,7 @@ func scenarioPruning(ctx context.Context) error {
 	}
 	for _, content := range groupC {
 		vec, _ := emb.Embed(ctx, content)
-		st.Insert(ctx, store.Memory{
+		_ = st.Insert(ctx, store.Memory{
 			ID:        primitive.NewObjectID(),
 			Content:   content,
 			Embedding: vec,
@@ -574,7 +574,7 @@ func scenarioRetrieval(ctx context.Context) error {
 	// --- Simulate retrieval hits on the "retrieved" group ---
 	for _, id := range retrievedIDs {
 		for j := 0; j < 5; j++ { // 5 hits each
-			st.IncrementHitCount(ctx, id)
+			_ = st.IncrementHitCount(ctx, id)
 		}
 	}
 

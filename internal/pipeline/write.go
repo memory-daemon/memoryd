@@ -469,9 +469,5 @@ func isNoise(text string, minLen int, minAlnum float64) bool {
 		}
 	}
 
-	if float64(alnumCount)/float64(len(trimmed)) < minAlnum {
-		return true
-	}
-
-	return false
+	return float64(alnumCount)/float64(len(trimmed)) < minAlnum
 }

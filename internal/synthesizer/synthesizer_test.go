@@ -325,7 +325,7 @@ func TestSynthesizeQA_PromptContainsUserAndAssistant(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	s.SynthesizeQA(context.Background(), "Why does config use port 7432?", "Because that port is unlikely to conflict.")
+	_, _ = s.SynthesizeQA(context.Background(), "Why does config use port 7432?", "Because that port is unlikely to conflict.")
 
 	if !strings.Contains(capturedPrompt, "USER: Why does config use port 7432?") {
 		t.Error("prompt should contain USER: prefix with the question")
@@ -349,7 +349,7 @@ func TestSynthesizeQA_EmptyQuestion_UsesAssistantOutputFrame(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	s.SynthesizeQA(context.Background(), "", "The embedder uses voyage-4-nano at 1024 dimensions.")
+	_, _ = s.SynthesizeQA(context.Background(), "", "The embedder uses voyage-4-nano at 1024 dimensions.")
 
 	if !strings.Contains(capturedPrompt, "ASSISTANT OUTPUT:") {
 		t.Error("empty question should use ASSISTANT OUTPUT: frame, not USER:/ASSISTANT:")
@@ -373,7 +373,7 @@ func TestSynthesizeQA_PromptHasTwoStageStructure(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	s.SynthesizeQA(context.Background(), "q", "a")
+	_, _ = s.SynthesizeQA(context.Background(), "q", "a")
 
 	if !strings.Contains(capturedPrompt, "STAGE 1: VALUE GATE") {
 		t.Error("prompt should contain STAGE 1: VALUE GATE")
@@ -423,7 +423,7 @@ func TestSynthesize_PromptContainsJournalisticInstruction(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	s.Synthesize(context.Background(), []string{"chunk one", "chunk two"})
+	_, _ = s.Synthesize(context.Background(), []string{"chunk one", "chunk two"})
 
 	if !strings.Contains(capturedPrompt, "journalistic prose") {
 		t.Error("Synthesize prompt should instruct journalistic prose")
@@ -451,7 +451,7 @@ func TestSynthesizeConversation_PromptContainsJournalisticInstruction(t *testing
 		{Role: "user", Content: "Fix the bug."},
 		{Role: "assistant", Content: "The nil check was missing."},
 	}
-	s.SynthesizeConversation(context.Background(), turns)
+	_, _ = s.SynthesizeConversation(context.Background(), turns)
 
 	if !strings.Contains(capturedPrompt, "journalistic prose") {
 		t.Error("SynthesizeConversation prompt should instruct journalistic prose")

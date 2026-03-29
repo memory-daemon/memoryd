@@ -416,17 +416,17 @@ func GetAnthropicAPIKey() string {
 
 // DeleteCredentials removes all memoryd credentials from the OS keychain.
 func DeleteCredentials() {
-	credential.Delete("mongodb_atlas_uri")
-	credential.Delete("anthropic_api_key")
+	_ = credential.Delete("mongodb_atlas_uri")
+	_ = credential.Delete("anthropic_api_key")
 	// Also clean up any per-database URI credentials.
 	cfg := Default
 	data, _ := os.ReadFile(Path())
 	if data != nil {
-		yaml.Unmarshal(data, &cfg)
+		_ = yaml.Unmarshal(data, &cfg)
 	}
 	for _, db := range cfg.Databases {
 		if db.Name != "" {
-			credential.Delete("db_uri_" + db.Name)
+			_ = credential.Delete("db_uri_" + db.Name)
 		}
 	}
 }
