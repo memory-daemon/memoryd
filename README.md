@@ -70,7 +70,7 @@ See the **[Getting Started](https://memory-daemon.github.io/memoryd/getting-star
 
 ### [Knowledge Capture](https://memory-daemon.github.io/memoryd/how-it-works/write-path)
 
-Every AI response is captured asynchronously (zero latency impact), broken into meaningful pieces, scrubbed of secrets (API keys, tokens, passwords — 13 detection patterns), deduplicated, and stored in the shared database.
+Every AI response is captured asynchronously (zero latency impact), passed through a multi-stage quality filter (length gate, adaptive content scoring, LLM synthesis gate), scrubbed of secrets (API keys, tokens, passwords — 13 detection patterns), deduplicated, and stored in the shared database. The system learns what noise looks like from rejected exchanges, improving filtering accuracy over time.
 
 ### [Context Retrieval](https://memory-daemon.github.io/memoryd/how-it-works/read-path)
 
@@ -112,7 +112,8 @@ internal/
     mongo.go              MongoDB implementation
     atlas.go              Atlas hybrid search (vector + text + RRF + MMR)
   redact/                 Secret scrubbing (13 patterns)
-  quality/                Usage tracking and quality scoring
+  quality/                Usage tracking, content scoring, adaptive noise learning
+  rejection/              Rejection store — ring buffer for adaptive noise prototype learning
   steward/                Background maintenance (score → prune → merge)
   ingest/                 Source ingestion and change detection
   crawler/                Web crawler with change detection
@@ -152,6 +153,10 @@ steward:
   prune_threshold: 0.1
   merge_threshold: 0.88
   decay_half_days: 90
+
+pipeline:
+  ingest_min_len: 80                  # Skip short responses before LLM call
+  content_score_pre_gate: 0.35        # Adaptive noise score threshold
 ```
 
 See the full **[Configuration Reference](https://memory-daemon.github.io/memoryd/configuration)**.
@@ -181,6 +186,7 @@ cd website && npm start
 - [x] Quality maintenance (scoring, pruning, merging)
 - [x] Atlas hybrid search (vector + text + RRF + MMR)
 - [x] Secret scrubbing (13 detection patterns)
+- [x] Adaptive noise filtering (pre-Haiku gates, rejection-based learning)
 - [x] Documentation site
 - [x] macOS menu bar app
 - [ ] Team-scoped knowledge (overlapping layers per team/BU)

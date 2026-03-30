@@ -647,6 +647,8 @@ By redacting before embedding, the vector captures the semantic meaning of the s
 | **Change detection** | SHA-256 per page/file | Not applicable (each response is new) |
 | **Redaction** | Yes — `redact.Clean()` per section | Yes — `redact.Clean()` per chunk |
 | **Noise filtering** | Drop sections < 30 chars | Drop chunks < 20 chars or < 40% alphanumeric |
+| **Pre-LLM gates** | None — ingested content is assumed worth embedding | 3-stage: QuickFilter → length gate (< 80 chars) → content score gate (< 0.35) |
+| **Adaptive learning** | None | Rejection store feeds noise prototypes back into content scorer |
 | **Embedding** | Batch per page (all sections in one call) | Single or batch per response |
 | **Execution** | Async goroutine, 30-min timeout | Async goroutine, fire-and-forget |
 

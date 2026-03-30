@@ -54,6 +54,17 @@ This is especially valuable for teams: three engineers debug the same service is
 | **Medium team (5-15)** | Cross-contributor dedup becomes significant. Quality scoring surfaces the team's most valuable knowledge. |
 | **Large team (15+)** | Essential. Without curation, the store would become too noisy for effective retrieval. The steward keeps signal-to-noise high. |
 
+## Adaptive noise filtering
+
+Beyond the steward's post-storage maintenance, memoryd also filters noise **before** knowledge enters the store. This happens through a multi-stage pipeline:
+
+1. **Pre-filter** — Fast string matching rejects obviously procedural exchanges (no LLM cost)
+2. **Length gate** — Very short responses (< 80 chars) are skipped
+3. **Content score gate** — Responses are scored against learned noise prototypes. Below the threshold, they're skipped before any LLM call
+4. **LLM quality gate** — A lightweight model (Claude Haiku) judges whether the exchange has durable value
+
+The content scorer **adapts over time**: rejected exchanges are accumulated in a ring buffer, and every 25 rejections the noise prototypes are rebuilt from actual rejected content. This means the system learns your team's specific noise patterns — the kind of procedural back-and-forth that happens in your codebase's conversations.
+
 ## Configuration
 
 All steward settings are tunable in `config.yaml`. See [Configuration](../configuration) for the full reference and team-specific tuning recommendations.

@@ -55,6 +55,11 @@ steward:
   decay_half_days: 90        # How quickly unused knowledge loses relevance
   merge_threshold: 0.88      # Similarity threshold for deduplication
   batch_size: 500            # Items processed per sweep
+
+# Write pipeline noise filtering
+pipeline:
+  ingest_min_len: 80              # Responses shorter than this skip LLM synthesis
+  content_score_pre_gate: 0.35    # Adaptive noise score threshold (0 = disabled)
 ```
 
 ## Atlas mode
@@ -78,6 +83,9 @@ The defaults work well for most teams. If you need to adjust:
 | **Seeing too many near-duplicates** | Lower `merge_threshold` to 0.85 |
 | **Want less aggressive cleanup** | Lower `prune_threshold` to 0.05, increase `grace_period_hours` to 72 |
 | **Heavy use of ingested sources** | Increase `batch_size` to 2000, lower `interval_minutes` to 30 |
+| **Too much noise getting stored** | Lower `content_score_pre_gate` to 0.30 (more aggressive filtering) |
+| **Valuable short responses being dropped** | Lower `ingest_min_len` to 40 |
+| **Want to disable adaptive filtering** | Set `content_score_pre_gate` to 0 |
 
 ## Environment variables
 

@@ -58,3 +58,5 @@ When you store a new memory that's similar (but not identical) to an existing so
 ## Adaptive quality learning
 
 The system tracks which memories get retrieved and how often. While in "learning mode" (< 50 retrieval events), it keeps everything. Use `quality_stats` to check the current learning status. Over time, memories that are never retrieved will score lower, helping the system learn what's worth keeping.
+
+The system also learns what **noise** looks like. Exchanges rejected by the pre-filter or synthesizer are accumulated in a ring buffer. Every 25 rejections, the assistant texts are re-embedded as noise prototypes and hot-swapped into the content scorer. This means the system adapts to your team's specific noise patterns — the more it sees procedural chatter, the better it gets at filtering it before spending an LLM call.

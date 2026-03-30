@@ -41,7 +41,8 @@ internal/
     atlas.go                Atlas-proper implementation — hybrid search, RRF, MMR re-ranking
   chunker/                  Paragraph-boundary text splitting (~512 token chunks)
   redact/                   Security scrubbing (AWS keys, API tokens, passwords, PII)
-  quality/                  Adaptive learning — tracks retrieval hits, learning threshold
+  quality/                  Adaptive learning — tracks retrieval hits, content scoring, noise prototypes
+  rejection/                Ring-buffer of rejected exchanges, adaptive noise learning
   steward/                  Background quality maintenance (scoring, pruning, merging)
   ingest/                   Source ingestion: crawl → chunk → batch-embed → store
   crawler/                  BFS web crawler with SHA256 change detection
@@ -92,13 +93,24 @@ if hs, ok := rp.store.(store.HybridSearcher); ok {
 
 **Write path** (every response):
 1. Response buffered from SSE stream
-2. Text chunked at paragraph boundaries (~512 tokens)
-3. Noise filtered (< 20 chars, < 40% alphanumeric)
-4. Secrets redacted before embedding
-5. All chunks batch-embedded in single HTTP call to llama.cpp
-6. Each chunk dedup-checked against store (cosine ≥ 0.92 = skip)
-7. Similar-to-source chunks tagged as extensions (cosine ≥ 0.75)
-8. Stored. All of this runs async in a goroutine — zero latency to Claude.
+2. **Pre-Haiku gates** (before any LLM call):
+   a. `QuickFilter` — pure string heuristic rejects procedural exchanges
+   b. Length gate — responses < `ingest_min_len` (default 80 chars) skipped
+   c. Content score gate — raw text embedded & scored against noise prototypes; below `content_score_pre_gate` (default 0.35) → skipped
+3. LLM synthesis gate (`SynthesizeQA`) — Haiku distills or returns "SKIP"
+4. Text chunked at paragraph boundaries (~512 tokens)
+5. Noise filtered (< 20 chars, < 40% alphanumeric)
+6. Secrets redacted before embedding
+7. All chunks batch-embedded in single HTTP call to llama.cpp
+8. Each chunk dedup-checked against store (cosine ≥ 0.92 = skip)
+9. Similar-to-source chunks tagged as extensions (cosine ≥ 0.75)
+10. Stored. All of this runs async in a goroutine — zero latency to Claude.
+
+**Rejection store** (adaptive noise learning):
+- Exchanges rejected by QuickFilter or synthesizer are logged to a ring buffer (500 entries)
+- Every 25 rejections, assistant texts are re-embedded as noise prototypes
+- Hot-swapped into the ContentScorer — the system learns what noise looks like
+- Persisted as JSONL at `~/.memoryd/rejection_log.jsonl`
 
 **Steward** (hourly background sweep):
 1. Score memories: `log2(hit_count + 1) / log2(maxHits + 1) × 0.5^(timeSinceRetrieval / 7d)`
@@ -174,6 +186,12 @@ type Embedder interface {
 | `RetrievalTopK` | 5 | config default | Memories per search |
 | `RetrievalMaxTokens` | 2048 | config default | Context budget for injection |
 | `QualityLearningThreshold` | 50 | quality/ | Retrievals before quality filtering activates |
+| `IngestMinLen` | 80 | config/PipelineConfig | Responses shorter than this skip Haiku entirely |
+| `ContentScorePreGate` | 0.35 | config/PipelineConfig | Pre-Haiku noise gate: below this → skip |
+| `noiseTopK` | 3 | quality/content.go | Top-K noise prototypes used in scoring (prevents dilution) |
+| `maxRejectionProtos` | 150 | quality/content.go | Max rejection texts used as noise prototypes |
+| `RebuildEvery` | 25 | rejection/store.go | Rejections between scorer rebuilds |
+| `DefaultMaxSize` | 500 | rejection/store.go | Ring buffer capacity |
 | `PruneThreshold` | 0.1 | steward config | Score below which memories get pruned |
 | `PruneGracePeriod` | 24h | steward config | Minimum age before pruning eligible |
 | `DecayHalfLife` | 90d | steward config | Unretrieved memory score half-life |
@@ -204,6 +222,10 @@ steward:
   decay_half_days: 90
   merge_threshold: 0.88
   batch_size: 500
+
+pipeline:
+  ingest_min_len: 80              # responses < this skip Haiku entirely
+  content_score_pre_gate: 0.35    # pre-Haiku noise gate threshold
 ```
 
 ---
@@ -324,6 +346,10 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:7432  # point Claude Code at it
 
 10. **Graceful shutdown.** The daemon catches SIGINT/SIGTERM, stops the steward, stops the HTTP server, then cancels context. The order matters.
 
+11. **Content score pre-gate does NOT feed rejection store.** Exchanges filtered by the content score gate are NOT added to the rejection store — only QuickFilter and synthesizer rejections feed back. This prevents a positive feedback loop where the scorer would amplify its own noise signal.
+
+12. **Top-K noise scoring, not averaging.** The ContentScorer uses the top-3 most similar noise prototypes, not the average of all. When the rejection store grows to 150+ entries, averaging would converge to a constant, destroying discriminative power.
+
 ---
 
 ## Memory Data Model
@@ -370,3 +396,6 @@ Additional collections: `retrieval_events`, `sources`, `source_pages`
 - Write path changes go in `pipeline/write.go`
 - Context formatting in `pipeline/inject.go`
 - Keep write path async — never block the response to Claude
+- Pre-Haiku gate changes go in `proxy/anthropic.go` and `proxy/api.go`
+- Rejection store logic is in `rejection/store.go`
+- Content scoring prototypes and noise learning are in `quality/content.go`

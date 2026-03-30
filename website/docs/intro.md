@@ -48,7 +48,7 @@ Teams don't need to standardize on one tool. Alice uses Claude Code, Bob uses Cu
 
 You don't need to understand the internals to use it, but here's what's happening under the hood:
 
-1. **[Knowledge capture](how-it-works/write-path)** — Every AI interaction routed through the proxy is automatically broken into meaningful pieces, scrubbed of secrets (API keys, tokens, passwords), deduplicated against what's already known, and stored.
+1. **[Knowledge capture](how-it-works/write-path)** — Every AI interaction routed through the proxy is automatically filtered through multi-stage noise detection (adaptive content scoring, LLM quality gates), scrubbed of secrets (API keys, tokens, passwords), deduplicated against what's already known, and stored. The system learns what noise looks like from your team's specific patterns.
 
 2. **[Knowledge retrieval & maintenance](how-it-works/read-path)** — AI tools access and manage the shared knowledge base through MCP tools — searching, storing, and updating knowledge. When a tool receives outdated information, it corrects the record so the whole team benefits.
 

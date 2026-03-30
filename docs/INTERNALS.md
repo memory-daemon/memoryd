@@ -880,10 +880,12 @@ When LLM synthesis is enabled, the proxy does more than raw capture:
 
 **Per-exchange (`ingest()`):**
 1. Extract the last user message from the request
-2. **Pre-filter:** `QuickFilter()` checks if both user and assistant messages are procedural → reject immediately
-3. **LLM quality gate:** `SynthesizeQA()` asks the model to distill or return `"SKIP"` → reject if no durable value
-4. **Store:** Distilled entry goes through `ProcessDirect()` (no chunking, already formatted)
-5. **Fallback:** If no synthesizer, store raw Q&A pair
+2. **Pre-filter:** `QuickFilter()` checks if both user and assistant messages are procedural → reject immediately (feeds rejection store)
+3. **Length gate:** Responses shorter than `ingest_min_len` (default 80 chars) are skipped — no LLM call
+4. **Content score gate:** Raw assistant text is embedded and scored against noise prototypes via `PreScore()`. Below `content_score_pre_gate` (default 0.35) → skipped. Does NOT feed rejection store (prevents positive feedback loop)
+5. **LLM quality gate:** `SynthesizeQA()` asks the model to distill or return `"SKIP"` → reject if no durable value (feeds rejection store)
+6. **Store:** Distilled entry goes through `ProcessDirect()` (no chunking, already formatted)
+7. **Fallback:** If no synthesizer, store raw Q&A pair
 
 **Session synthesis:**
 - Fired at 3 complete Q&A pairs, then every 5 pairs after
@@ -990,6 +992,10 @@ Created automatically on first run with sensible defaults. All pipeline threshol
 | `sessionSynthesisInterval` | 5 | proxy/anthropic.go | Pairs between subsequent summaries |
 | `RebuildEvery` (rejection) | 25 | rejection/store.go | Rejections between scorer rebuilds |
 | `DefaultMaxSize` (rejection) | 500 | rejection/store.go | Max entries in rejection ring buffer |
+| `IngestMinLen` | 80 | config/PipelineConfig | Responses shorter than this skip Haiku entirely |
+| `ContentScorePreGate` | 0.35 | config/PipelineConfig | Pre-Haiku noise gate: below this → skip |
+| `noiseTopK` | 3 | quality/content.go | Top-K noise prototypes used in scoring |
+| `maxRejectionProtos` | 150 | quality/content.go | Max rejection texts used as noise prototypes |
 
 ---
 

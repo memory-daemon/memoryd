@@ -167,6 +167,36 @@ The patterns cover:
 
 A second pass scans each line for key-value patterns containing sensitive keywords and redacts their values. The order is deliberate — specific patterns match first (AWS, GitHub), then generic patterns catch the rest.
 
+## Adaptive noise filtering
+
+Before any response reaches the LLM synthesis step, it passes through three progressively more expensive filters:
+
+### Pre-filter (string matching)
+
+Pure pattern matching — checks whether the user message is a known acknowledgment and the assistant response starts with a procedural prefix. Catches ~15-20% of exchanges at zero LLM cost.
+
+### Length gate
+
+Responses under 80 characters (configurable via `ingest_min_len`) are skipped. In benchmarking, 0% of responses under 100 characters contained durable knowledge.
+
+### Content score gate
+
+The raw response text is embedded and scored against **noise prototypes** — embeddings of content the system has previously identified as low-value. The scoring formula:
+
+$$
+\text{score} = \frac{\text{avgQualitySim}}{\text{avgQualitySim} + \text{topKNoiseSim}}
+$$
+
+Uses the **top-3 most similar** noise prototypes rather than averaging all of them. This prevents dilution when the prototype set grows large — averaging hundreds of diverse noise vectors would converge to a constant, destroying discriminative power.
+
+### Adaptive learning loop
+
+The noise prototypes aren't static. A ring buffer (500 entries) accumulates rejected exchanges from both the pre-filter and LLM synthesis stages. Every 25 rejections, the assistant texts are re-embedded and hot-swapped into the content scorer. The system progressively learns what noise looks like for your specific team and codebase.
+
+**Critical design detail:** The content score gate does *not* feed its rejections back into the rejection store. Only pre-filter and synthesizer rejections contribute. This prevents a positive feedback loop where the scorer would amplify its own signal, gradually rejecting everything.
+
+The rejection log persists across daemon restarts as JSONL at `~/.memoryd/rejection_log.jsonl`.
+
 ## Streaming architecture
 
 The proxy handles Server-Sent Events (SSE) end-to-end:
