@@ -157,7 +157,7 @@ func scenarioReadTopK(ctx context.Context) error {
 	for i := 0; i < 20; i++ {
 		content := fmt.Sprintf("Technical note %d: the memoryd pipeline component number %d handles a distinct stage of the ingestion and retrieval workflow with specific configuration options.", i, i)
 		vec, _ := emb.Embed(ctx, content)
-		st.Insert(ctx, store.Memory{
+		_ = st.Insert(ctx, store.Memory{
 			ID:        primitive.NewObjectID(),
 			Content:   content,
 			Embedding: vec,
@@ -200,7 +200,7 @@ func scenarioReadQuerySelfRetrieval(ctx context.Context) error {
 	// Store a specific fact.
 	fact := "The memoryd write pipeline runs deduplication using cosine similarity threshold 0.92 against all stored memory embeddings before inserting a new chunk."
 	vec, _ := emb.Embed(ctx, fact)
-	st.Insert(ctx, store.Memory{
+	_ = st.Insert(ctx, store.Memory{
 		ID:        primitive.NewObjectID(),
 		Content:   fact,
 		Embedding: vec,
