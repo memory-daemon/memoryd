@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -26,12 +29,64 @@ type LlamaEmbedder struct {
 	closeOnce sync.Once
 }
 
+// killExistingLlamaServer kills all llama-server processes owned by the current
+// user, then waits for each to exit. This cleans up orphaned processes from
+// previous daemon runs that exited without proper cleanup.
+func killExistingLlamaServer() {
+	pids := findLlamaServerPIDs()
+	if len(pids) == 0 {
+		return
+	}
+
+	for _, pid := range pids {
+		log.Printf("[embedding] killing orphaned llama-server (PID %d)", pid)
+		_ = syscall.Kill(pid, syscall.SIGTERM)
+	}
+
+	// Wait for all signaled processes to exit (up to 5s).
+	deadline := time.Now().Add(5 * time.Second)
+	for _, pid := range pids {
+		for time.Now().Before(deadline) {
+			if err := syscall.Kill(pid, 0); err != nil {
+				break // process exited
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+		// If still alive after deadline, force kill.
+		if err := syscall.Kill(pid, 0); err == nil {
+			log.Printf("[embedding] force-killing llama-server (PID %d)", pid)
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	}
+}
+
+// findLlamaServerPIDs returns PIDs of all llama-server processes owned by the
+// current user, using pgrep for reliability (avoids inherited fd issues with lsof).
+func findLlamaServerPIDs() []int {
+	out, err := exec.Command("pgrep", "-x", "llama-server").Output()
+	if err != nil {
+		return nil
+	}
+	var pids []int
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		pid, err := strconv.Atoi(strings.TrimSpace(line))
+		if err != nil || pid <= 0 || pid == os.Getpid() {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return pids
+}
+
 // NewLlamaEmbedder starts llama-server with the given GGUF model.
 // Requires llama.cpp to be installed (brew install llama.cpp).
 func NewLlamaEmbedder(modelPath string, dim int) (*LlamaEmbedder, error) {
 	if _, err := os.Stat(modelPath); err != nil {
 		return nil, fmt.Errorf("model not found at %s — download the GGUF from HuggingFace", modelPath)
 	}
+
+	// Clean up any orphaned llama-server from a previous run.
+	killExistingLlamaServer()
 
 	serverURL := "http://127.0.0.1:" + embeddingServerPort
 

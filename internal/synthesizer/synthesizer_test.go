@@ -513,3 +513,128 @@ func TestSynthesizeConversation_PromptContainsJournalisticInstruction(t *testing
 		t.Error("SynthesizeConversation prompt should instruct accepting raw value")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Azure OpenAI backend tests
+// ---------------------------------------------------------------------------
+
+func mockAzureResponse(text string) []byte {
+	resp := map[string]any{
+		"choices": []map[string]any{
+			{"message": map[string]string{"role": "assistant", "content": text}},
+		},
+	}
+	b, _ := json.Marshal(resp)
+	return b
+}
+
+func TestAzure_Available(t *testing.T) {
+	s := NewAzure(AzureConfig{
+		Endpoint:   "https://myresource.openai.azure.com",
+		Deployment: "gpt-4o-mini",
+		APIVersion: "2024-06-01",
+		APIKey:     "abc123",
+	})
+	if !s.Available() {
+		t.Error("Azure synthesizer with all fields should be available")
+	}
+}
+
+func TestAzure_NotAvailable_NoKey(t *testing.T) {
+	s := NewAzure(AzureConfig{
+		Endpoint:   "https://myresource.openai.azure.com",
+		Deployment: "gpt-4o-mini",
+		APIVersion: "2024-06-01",
+	})
+	if s.Available() {
+		t.Error("Azure synthesizer without API key should not be available")
+	}
+}
+
+func TestAzure_NotAvailable_NoEndpoint(t *testing.T) {
+	s := NewAzure(AzureConfig{
+		Deployment: "gpt-4o-mini",
+		APIVersion: "2024-06-01",
+		APIKey:     "abc123",
+	})
+	if s.Available() {
+		t.Error("Azure synthesizer without endpoint should not be available")
+	}
+}
+
+func TestAzure_SynthesizeQA(t *testing.T) {
+	const synthesized = "The proxy server binds to 127.0.0.1:7432."
+	var capturedPath string
+	var capturedAPIKey string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		capturedPath = r.URL.Path + "?" + r.URL.RawQuery
+		capturedAPIKey = r.Header.Get("api-key")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mockAzureResponse(synthesized))
+	}))
+	defer server.Close()
+
+	s := NewAzure(AzureConfig{
+		Endpoint:   server.URL,
+		Deployment: "gpt-4o-mini",
+		APIVersion: "2024-06-01",
+		APIKey:     "test-key-123",
+	})
+	result, err := s.SynthesizeQA(context.Background(), "How does the proxy work?", "It binds to 127.0.0.1:7432.")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != synthesized {
+		t.Errorf("unexpected result: %q", result)
+	}
+	if capturedPath != "/openai/deployments/gpt-4o-mini/chat/completions?api-version=2024-06-01" {
+		t.Errorf("unexpected request path: %s", capturedPath)
+	}
+	if capturedAPIKey != "test-key-123" {
+		t.Errorf("unexpected api-key header: %s", capturedAPIKey)
+	}
+}
+
+func TestAzure_SKIP(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mockAzureResponse("SKIP"))
+	}))
+	defer server.Close()
+
+	s := NewAzure(AzureConfig{
+		Endpoint:   server.URL,
+		Deployment: "gpt-4o-mini",
+		APIVersion: "2024-06-01",
+		APIKey:     "test-key",
+	})
+	result, err := s.SynthesizeQA(context.Background(), "q", "a")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result != "" {
+		t.Errorf("expected empty result for SKIP, got: %q", result)
+	}
+}
+
+func TestAzure_Synthesize(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mockAzureResponse("Combined knowledge about Go concurrency patterns."))
+	}))
+	defer server.Close()
+
+	s := NewAzure(AzureConfig{
+		Endpoint:   server.URL,
+		Deployment: "gpt-4o-mini",
+		APIVersion: "2024-06-01",
+		APIKey:     "test-key",
+	})
+	result, err := s.Synthesize(context.Background(), []string{"chunk one", "chunk two"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(result, "Go concurrency") {
+		t.Errorf("unexpected result: %q", result)
+	}
+}

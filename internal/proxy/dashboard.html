@@ -25,33 +25,53 @@
     --mono: ui-monospace, "SF Mono", "Cascadia Code", "Segoe UI Mono", monospace;
     --radius: 6px;
     --shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+    --sidebar-w: 200px;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100vh; font-size: 14px; line-height: 1.5; overflow: hidden; }
 
-  .layout { max-width: 1080px; margin: 0 auto; padding: 32px 24px; }
+  /* App shell: sidebar + main */
+  .app { display: flex; height: 100vh; }
 
-  /* Header */
-  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 28px; }
-  .header-left { display: flex; align-items: center; gap: 10px; }
-  .header-left h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
-  .status-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; padding: 3px 10px; border-radius: 12px; }
-  .status-badge.ok { background: var(--green-bg); color: var(--green); }
-  .status-badge.down { background: var(--red-bg); color: var(--red); }
-  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .header-right { font-size: 12px; color: var(--text-muted); }
+  /* Sidebar */
+  .sidebar { width: var(--sidebar-w); background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+  .sidebar-brand { padding: 20px 16px 8px; display: flex; align-items: center; gap: 8px; }
+  .sidebar-brand h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; }
+  .sidebar-status { padding: 0 16px 16px; font-size: 12px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+  .sidebar-status .status-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 10px; }
+  .sidebar-status .status-badge.ok { background: var(--green-bg); color: var(--green); }
+  .sidebar-status .status-badge.down { background: var(--red-bg); color: var(--red); }
+  .status-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+  .sidebar-nav { flex: 1; padding: 12px 0; overflow-y: auto; }
+  .nav-group-label { font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.08em; padding: 12px 16px 4px; }
+  .nav-item { display: flex; align-items: center; gap: 8px; padding: 7px 16px; font-size: 13px; font-weight: 500; color: var(--text-secondary); cursor: pointer; transition: background 0.1s, color 0.1s; border-left: 2px solid transparent; }
+  .nav-item:hover { background: var(--bg); color: var(--text); }
+  .nav-item.active { background: var(--accent-light); color: var(--accent); border-left-color: var(--accent); }
+  .nav-icon { width: 16px; text-align: center; font-size: 14px; flex-shrink: 0; }
+
+  .sidebar-footer { padding: 12px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted); }
+
+  /* Main content area */
+  .main { flex: 1; overflow-y: auto; }
+  .main-inner { max-width: 960px; padding: 28px 32px; }
+
+  /* Pages */
+  .page { display: none; }
+  .page.active { display: block; }
+  .page-title { font-size: 18px; font-weight: 600; margin-bottom: 20px; letter-spacing: -0.01em; }
 
   /* Stat cards */
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 28px; }
-  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); }
-  .stat-label { font-size: 11px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 6px; }
-  .stat-value { font-size: 26px; font-weight: 600; font-family: var(--mono); color: var(--text); line-height: 1.2; }
-  .stat-sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
+  .stat-label { font-size: 11px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .stat-value { font-size: 24px; font-weight: 600; font-family: var(--mono); color: var(--text); line-height: 1.2; }
+  .stat-sub { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
 
   /* Sections */
-  .section { margin-bottom: 28px; }
-  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .section { margin-bottom: 24px; }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
   .section-title { font-size: 14px; font-weight: 600; }
   .section-meta { font-size: 12px; color: var(--text-muted); }
 
@@ -78,18 +98,15 @@
   .score-fill { height: 100%; background: var(--accent); border-radius: 2px; }
   .score-text { font-size: 12px; font-family: var(--mono); color: var(--text-secondary); }
 
-  /* Progress bar for quality learning */
-  .progress-container { margin-top: 6px; }
+  /* Progress bar */
+  .progress-container { margin-top: 5px; }
   .progress-track { width: 100%; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
   .progress-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s ease; }
-
-  /* Content cell */
-  .content-cell { max-width: 480px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* Empty state */
   .empty-state { padding: 40px; text-align: center; color: var(--text-muted); font-size: 13px; }
 
-  /* Tabs */
+  /* Tabs (inner, for pages that have sub-tabs) */
   .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 0; }
   .tab { padding: 10px 16px; font-size: 13px; font-weight: 500; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color 0.15s, border-color 0.15s; }
   .tab:hover { color: var(--text); }
@@ -100,7 +117,7 @@
   /* Time display */
   .time-ago { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 
-  /* Add source form */
+  /* Forms */
   .add-source-form { display: flex; gap: 8px; padding: 14px; border-bottom: 1px solid var(--border); align-items: flex-end; }
   .form-group { display: flex; flex-direction: column; gap: 3px; }
   .form-group label { font-size: 11px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
@@ -117,8 +134,6 @@
   .form-message { font-size: 12px; padding: 0 14px 10px; }
   .form-message.success { color: var(--green); }
   .form-message.error { color: var(--red); }
-
-  /* Divider between forms */
   .form-divider { display: flex; align-items: center; gap: 12px; padding: 0 14px; font-size: 11px; font-weight: 500; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
   .form-divider::before, .form-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 
@@ -128,14 +143,6 @@
   .file-input-wrap input[type="file"] { font-family: var(--font); font-size: 13px; padding: 5px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); width: 100%; outline: none; }
   .file-input-wrap input[type="file"]:focus { border-color: var(--accent); }
   .file-count { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
-
-  @media (max-width: 768px) {
-    .stats { grid-template-columns: repeat(2, 1fr); }
-    .layout { padding: 20px 16px; }
-  }
-  @media (max-width: 480px) {
-    .stats { grid-template-columns: 1fr; }
-  }
 
   /* Knowledge list */
   .knowledge-item { padding: 12px 14px; border-bottom: 1px solid var(--border-light); }
@@ -163,10 +170,10 @@
   .tag-disabled { background: var(--red-bg); color: var(--red); }
 
   /* Two-column layout */
-  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
-  @media (max-width: 768px) { .two-col { grid-template-columns: 1fr; } }
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
 
-  /* Pipeline settings */
+  /* Pipeline / settings sections */
   .pipeline-section { padding: 16px 14px; border-bottom: 1px solid var(--border); }
   .pipeline-section:last-child { border-bottom: none; }
   .pipeline-section-title { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 12px; }
@@ -186,7 +193,7 @@
   .pipeline-status.error { color: var(--red); }
 
   /* Activity list items */
-  .activity-list { max-height: 320px; overflow-y: auto; }
+  .activity-list { max-height: 380px; overflow-y: auto; }
   .activity-item { display: flex; align-items: flex-start; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border-light); font-size: 13px; }
   .activity-item:last-child { border-bottom: none; }
   .activity-item:hover { background: #f6f8fa; }
@@ -197,287 +204,471 @@
   .activity-text { font-family: var(--mono); font-size: 12px; color: var(--text-secondary); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .activity-meta { display: flex; align-items: center; gap: 8px; margin-top: 3px; }
 
-  /* 5-column stats on wide, 3+2 on medium */
-  @media (min-width: 769px) { .stats { grid-template-columns: repeat(5, 1fr); } }
+  /* Content cell */
+  .content-cell { max-width: 480px; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>
 </head>
 <body>
-<div class="layout">
-  <header>
-    <div class="header-left">
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
       <h1>memoryd</h1>
+    </div>
+    <div class="sidebar-status">
       <span class="status-badge down" id="statusBadge"><span class="status-dot"></span><span id="statusLabel">checking</span></span>
+      <div style="margin-top:4px" id="portDisplay"></div>
     </div>
-    <div class="header-right" id="portDisplay"></div>
-  </header>
+    <nav class="sidebar-nav">
+      <div class="nav-item active" data-page="overview">
+        <span class="nav-icon">&#9675;</span> Overview
+      </div>
+      <div class="nav-item" data-page="knowledge">
+        <span class="nav-icon">&#9733;</span> Knowledge
+      </div>
+      <div class="nav-item" data-page="export">
+        <span class="nav-icon">&#8681;</span> Export
+      </div>
+      <div class="nav-group-label">Configuration</div>
+      <div class="nav-item" data-page="settings">
+        <span class="nav-icon">&#9881;</span> Settings
+      </div>
+      <div class="nav-item" data-page="databases">
+        <span class="nav-icon">&#8644;</span> Team Databases
+      </div>
+      <div class="nav-item" data-page="pipeline">
+        <span class="nav-icon">&#9783;</span> Pipeline
+      </div>
+      <div class="nav-item" data-page="logs">
+        <span class="nav-icon">&#9776;</span> Logs
+      </div>
+    </nav>
+  </aside>
 
-  <div class="stats">
-    <div class="stat-card">
-      <div class="stat-label">Knowledge chunks</div>
-      <div class="stat-value" id="memoryCount">&mdash;</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Knowledge sources</div>
-      <div class="stat-value" id="sourceCount">&mdash;</div>
-      <div class="stat-sub" id="sourceSub"></div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Retrievals</div>
-      <div class="stat-value" id="retrievalCount">&mdash;</div>
-      <div class="stat-sub" id="retrievalSub"></div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Quality learning</div>
-      <div class="stat-value" id="learningStatus">&mdash;</div>
-      <div class="stat-sub" id="learningSub"></div>
-      <div class="progress-container" id="learningProgress" style="display:none">
-        <div class="progress-track"><div class="progress-fill" id="learningFill"></div></div>
-      </div>
-    </div>
-    <div class="stat-card" id="stewardCard" style="display:none">
-      <div class="stat-label">Steward (last sweep)</div>
-      <div class="stat-value" id="stewardSummary">&mdash;</div>
-      <div class="stat-sub" id="stewardSub"></div>
-    </div>
-  </div>
+  <!-- Main content -->
+  <div class="main">
+    <div class="main-inner">
 
-  <!-- Activity panels: recent retrievals + top memories -->
-  <div class="two-col" id="activitySection">
-    <div class="section">
-      <div class="section-header">
-        <div class="section-title">Recent retrievals</div>
-      </div>
-      <div class="card">
-        <div id="retrievalList" class="activity-list">
-          <div class="empty-state">No retrievals yet</div>
-        </div>
-      </div>
-    </div>
-    <div class="section">
-      <div class="section-header">
-        <div class="section-title">Top memories</div>
-        <div class="section-meta">by retrieval count</div>
-      </div>
-      <div class="card">
-        <div id="topMemList" class="activity-list">
-          <div class="empty-state">No data yet</div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="card">
-      <div class="tabs">
-        <div class="tab active" data-tab="knowledge">Knowledge base</div>
-        <div class="tab" data-tab="sources">Knowledge sources</div>
-        <div class="tab" data-tab="databases">Team databases</div>
-        <div class="tab" data-tab="pipeline">Pipeline</div>
-      </div>
-
-      <div class="tab-content active" id="tab-knowledge">
-        <div style="padding:14px;display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--border)">
-          <select id="sourceFilter" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none">
-            <option value="">All sources</option>
-          </select>
-          <input type="text" id="knowledgeSearch" placeholder="Search knowledge..." style="flex:1;font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none">
-        </div>
-        <div id="knowledgeList">
-          <div class="empty-state">Select a source or search to browse knowledge</div>
-        </div>
-      </div>
-
-      <div class="tab-content" id="tab-sources">
-        <form class="add-source-form" id="addSourceForm" autocomplete="off">
-          <div class="form-group name-field">
-            <label for="sourceName">Name</label>
-            <input type="text" id="sourceName" placeholder="e.g. Company Docs" required>
+      <!-- PAGE: Overview -->
+      <div class="page active" id="page-overview">
+        <div class="page-title">Overview</div>
+        <div class="stats">
+          <div class="stat-card">
+            <div class="stat-label">Knowledge chunks</div>
+            <div class="stat-value" id="memoryCount">&mdash;</div>
           </div>
-          <div class="form-group url-field">
-            <label for="sourceURL">Base URL to crawl</label>
-            <input type="url" id="sourceURL" placeholder="https://docs.example.com" required>
+          <div class="stat-card">
+            <div class="stat-label">Knowledge sources</div>
+            <div class="stat-value" id="sourceCount">&mdash;</div>
+            <div class="stat-sub" id="sourceSub"></div>
           </div>
-          <button type="submit" class="btn btn-primary" id="addSourceBtn">Add source</button>
-        </form>
-        <div class="form-message" id="formMessage" style="display:none"></div>
-        <div class="form-divider">or upload files</div>
-        <form class="upload-form" id="uploadForm" autocomplete="off">
-          <div class="form-group name-field">
-            <label for="uploadName">Name</label>
-            <input type="text" id="uploadName" placeholder="e.g. Design Docs" required>
+          <div class="stat-card">
+            <div class="stat-label">Retrievals</div>
+            <div class="stat-value" id="retrievalCount">&mdash;</div>
+            <div class="stat-sub" id="retrievalSub"></div>
           </div>
-          <div class="form-group" style="flex:1">
-            <label for="uploadFiles">Files</label>
-            <div class="file-input-wrap">
-              <input type="file" id="uploadFiles" multiple accept=".md,.txt,.html,.htm,.json,.yaml,.yml,.go,.py,.js,.ts,.rst,.xml,.csv,.toml" required>
-              <div class="file-count" id="fileCount"></div>
+          <div class="stat-card">
+            <div class="stat-label">Quality learning</div>
+            <div class="stat-value" id="learningStatus">&mdash;</div>
+            <div class="stat-sub" id="learningSub"></div>
+            <div class="progress-container" id="learningProgress" style="display:none">
+              <div class="progress-track"><div class="progress-fill" id="learningFill"></div></div>
             </div>
           </div>
-          <button type="submit" class="btn btn-primary" id="uploadBtn">Upload</button>
-        </form>
-        <div class="form-message" id="uploadMessage" style="display:none"></div>
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>URL</th>
-              <th>Status</th>
-              <th>Pages</th>
-              <th>Memories</th>
-              <th>Last crawled</th>
-            </tr>
-          </thead>
-          <tbody id="sourceRows">
-            <tr><td colspan="6" class="empty-state">No sources ingested</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="tab-content" id="tab-databases">
-        <form class="add-source-form" id="addDbForm" autocomplete="off">
-          <div class="form-group name-field">
-            <label for="dbName">Name</label>
-            <input type="text" id="dbName" placeholder="e.g. Payments Team" required>
-          </div>
-          <div class="form-group url-field">
-            <label for="dbURI">Connection string</label>
-            <input type="text" id="dbURI" placeholder="mongodb+srv://..." required>
-          </div>
-          <div class="form-group name-field">
-            <label for="dbDatabase">Database</label>
-            <input type="text" id="dbDatabase" placeholder="e.g. payments" required>
-          </div>
-          <button type="submit" class="btn btn-primary" id="addDbBtn">Connect</button>
-        </form>
-        <div class="form-message" id="dbFormMessage" style="display:none"></div>
-        <table>
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Database</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Enabled</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="dbRows">
-            <tr><td colspan="6" class="empty-state">No team databases connected</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div class="tab-content" id="tab-pipeline">
-        <!-- Noise filter -->
-        <div class="pipeline-section">
-          <div class="pipeline-section-title">Noise filter</div>
-          <div class="pipeline-grid">
-            <div class="pipeline-field">
-              <label for="p_noise_min_len">Min length (chars)</label>
-              <input type="number" id="p_noise_min_len" min="1" max="500" step="1" value="20">
-              <span class="field-hint">Chunks shorter than this are dropped</span>
-            </div>
-            <div class="pipeline-field">
-              <label for="p_noise_min_alnum">Min alphanumeric ratio</label>
-              <input type="number" id="p_noise_min_alnum" min="0" max="1" step="0.05" value="0.4">
-              <span class="field-hint">0 – 1 · e.g. 0.4 = 40% must be letters/digits</span>
-            </div>
-            <div class="pipeline-field">
-              <label for="p_content_score_gate">Content score gate</label>
-              <input type="number" id="p_content_score_gate" min="0" max="1" step="0.05" value="0">
-              <span class="field-hint">0 = disabled · drop chunks scoring below this</span>
-            </div>
+          <div class="stat-card" id="stewardCard" style="display:none">
+            <div class="stat-label">Steward (last sweep)</div>
+            <div class="stat-value" id="stewardSummary">&mdash;</div>
+            <div class="stat-sub" id="stewardSub"></div>
           </div>
         </div>
 
-        <!-- Content scoring prototypes -->
-        <div class="pipeline-section">
-          <div class="pipeline-section-title">Content scoring prototypes</div>
-          <div class="pipeline-grid">
-            <div class="pipeline-field pipeline-protos">
-              <label for="p_quality_protos">Quality prototypes (one per line)</label>
-              <textarea id="p_quality_protos" rows="6"></textarea>
-              <span class="field-hint">Chunks semantically close to these score higher. Changes trigger scorer reload.</span>
+        <div class="two-col">
+          <div class="section">
+            <div class="section-header">
+              <div class="section-title">Recent retrievals</div>
             </div>
-            <div class="pipeline-field pipeline-protos">
-              <label for="p_noise_protos">Noise prototypes (one per line)</label>
-              <textarea id="p_noise_protos" rows="4"></textarea>
-              <span class="field-hint">Chunks close to these score lower.</span>
+            <div class="card">
+              <div id="retrievalList" class="activity-list">
+                <div class="empty-state">No retrievals yet</div>
+              </div>
             </div>
           </div>
-        </div>
-
-        <!-- Deduplication -->
-        <div class="pipeline-section">
-          <div class="pipeline-section-title">Deduplication</div>
-          <div class="pipeline-grid">
-            <div class="pipeline-field">
-              <label for="p_dedup_threshold">Dedup threshold</label>
-              <input type="number" id="p_dedup_threshold" min="0.5" max="1" step="0.01" value="0.92">
-              <span class="field-hint">Cosine ≥ this → duplicate, skip</span>
+          <div class="section">
+            <div class="section-header">
+              <div class="section-title">Top memories</div>
+              <div class="section-meta">by retrieval count</div>
             </div>
-            <div class="pipeline-field">
-              <label for="p_source_ext_threshold">Source extension threshold</label>
-              <input type="number" id="p_source_ext_threshold" min="0" max="1" step="0.01" value="0.75">
-              <span class="field-hint">Tag as extending a source memory above this score</span>
+            <div class="card">
+              <div id="topMemList" class="activity-list">
+                <div class="empty-state">No data yet</div>
+              </div>
             </div>
           </div>
-        </div>
-
-        <!-- Topic grouping -->
-        <div class="pipeline-section">
-          <div class="pipeline-section-title">Topic grouping</div>
-          <div class="pipeline-grid">
-            <div class="pipeline-field">
-              <label for="p_topic_boundary">Topic boundary threshold</label>
-              <input type="number" id="p_topic_boundary" min="0" max="1" step="0.05" value="0.65">
-              <span class="field-hint">Cosine below this between consecutive chunks splits a group</span>
-            </div>
-            <div class="pipeline-field">
-              <label for="p_max_group_chars">Max group chars</label>
-              <input type="number" id="p_max_group_chars" min="256" max="16384" step="256" value="2048">
-              <span class="field-hint">Groups are split to stay within this budget</span>
-            </div>
-          </div>
-        </div>
-
-        <!-- Steward -->
-        <div class="pipeline-section">
-          <div class="pipeline-section-title">Steward <span style="font-weight:400;text-transform:none;letter-spacing:0">(restart required)</span></div>
-          <div class="pipeline-grid">
-            <div class="pipeline-field">
-              <label for="s_interval">Sweep interval (minutes)</label>
-              <input type="number" id="s_interval" min="1" max="1440" step="1" value="60">
-            </div>
-            <div class="pipeline-field">
-              <label for="s_prune_threshold">Prune threshold</label>
-              <input type="number" id="s_prune_threshold" min="0" max="1" step="0.01" value="0.1">
-              <span class="field-hint">Quality score below this → pruned</span>
-            </div>
-            <div class="pipeline-field">
-              <label for="s_merge_threshold">Merge threshold</label>
-              <input type="number" id="s_merge_threshold" min="0.5" max="1" step="0.01" value="0.88">
-              <span class="field-hint">Cosine above this → steward merges memories</span>
-            </div>
-            <div class="pipeline-field">
-              <label for="s_decay_half_days">Decay half-life (days)</label>
-              <input type="number" id="s_decay_half_days" min="1" max="3650" step="1" value="90">
-            </div>
-            <div class="pipeline-field">
-              <label for="s_grace_hours">Grace period (hours)</label>
-              <input type="number" id="s_grace_hours" min="0" max="720" step="1" value="24">
-            </div>
-          </div>
-        </div>
-
-        <div class="pipeline-footer">
-          <span class="pipeline-note" id="pipelineNote"></span>
-          <span class="pipeline-status" id="pipelineStatus"></span>
-          <button class="btn btn-primary" id="savePipelineBtn" onclick="savePipeline()">Save changes</button>
         </div>
       </div>
 
+      <!-- PAGE: Knowledge -->
+      <div class="page" id="page-knowledge">
+        <div class="page-title">Knowledge</div>
+        <div class="card" style="margin-bottom:24px">
+          <div class="tabs">
+            <div class="tab active" data-tab="knowledge">Knowledge base</div>
+            <div class="tab" data-tab="sources">Knowledge sources</div>
+          </div>
+
+          <div class="tab-content active" id="tab-knowledge">
+            <div style="padding:14px;display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--border)">
+              <select id="sourceFilter" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none">
+                <option value="">All sources</option>
+              </select>
+              <input type="text" id="knowledgeSearch" placeholder="Search knowledge..." style="flex:1;font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none">
+            </div>
+            <div id="knowledgeList">
+              <div class="empty-state">Select a source or search to browse knowledge</div>
+            </div>
+          </div>
+
+          <div class="tab-content" id="tab-sources">
+            <form class="add-source-form" id="addSourceForm" autocomplete="off">
+              <div class="form-group name-field">
+                <label for="sourceName">Name</label>
+                <input type="text" id="sourceName" placeholder="e.g. Company Docs" required>
+              </div>
+              <div class="form-group url-field">
+                <label for="sourceURL">Base URL to crawl</label>
+                <input type="url" id="sourceURL" placeholder="https://docs.example.com" required>
+              </div>
+              <button type="submit" class="btn btn-primary" id="addSourceBtn">Add source</button>
+            </form>
+            <div class="form-message" id="formMessage" style="display:none"></div>
+            <div class="form-divider">or upload files</div>
+            <form class="upload-form" id="uploadForm" autocomplete="off">
+              <div class="form-group name-field">
+                <label for="uploadName">Name</label>
+                <input type="text" id="uploadName" placeholder="e.g. Design Docs" required>
+              </div>
+              <div class="form-group" style="flex:1">
+                <label for="uploadFiles">Files</label>
+                <div class="file-input-wrap">
+                  <input type="file" id="uploadFiles" multiple accept=".md,.txt,.html,.htm,.json,.yaml,.yml,.go,.py,.js,.ts,.rst,.xml,.csv,.toml" required>
+                  <div class="file-count" id="fileCount"></div>
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary" id="uploadBtn">Upload</button>
+            </form>
+            <div class="form-message" id="uploadMessage" style="display:none"></div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>URL</th>
+                  <th>Status</th>
+                  <th>Pages</th>
+                  <th>Memories</th>
+                  <th>Last crawled</th>
+                </tr>
+              </thead>
+              <tbody id="sourceRows">
+                <tr><td colspan="6" class="empty-state">No sources ingested</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
+
+      <!-- PAGE: Settings -->
+      <div class="page" id="page-settings">
+        <div class="page-title">Settings</div>
+        <div class="card">
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Mode</div>
+            <div class="pipeline-grid">
+              <div class="pipeline-field" style="grid-column: 1 / -1">
+                <label for="s_mode">Integration mode</label>
+                <select id="s_mode" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;max-width:320px">
+                  <option value="proxy">Proxy – auto read &amp; write</option>
+                  <option value="mcp">MCP – read &amp; write</option>
+                  <option value="mcp-readonly">MCP – read only</option>
+                </select>
+                <span class="field-hint">How memoryd integrates with your coding agent. Restart required.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">MongoDB connection</div>
+            <div class="pipeline-grid">
+              <div class="pipeline-field" style="grid-column: 1 / -1">
+                <label for="s_mongo_uri">Connection string</label>
+                <input type="text" id="s_mongo_uri" placeholder="mongodb+srv://... or mongodb://localhost:27017/?directConnection=true" style="font-family:var(--mono);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                <span class="field-hint">Stored in the OS keychain. Leave empty to disconnect.</span>
+                <span class="field-hint" id="s_mongo_status" style="margin-top:2px"></span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">LLM synthesis <span style="font-weight:400;text-transform:none;letter-spacing:0">(distills conversations into knowledge)</span></div>
+            <div style="padding:4px 0 12px;font-size:12px;color:var(--text-muted)">Configure <strong>one</strong> of the following. Anthropic (Haiku) is preferred; Azure OpenAI is the alternative. Without either, memoryd stores raw exchanges at reduced quality.</div>
+
+            <div style="margin-bottom:16px">
+              <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Anthropic (Haiku)</div>
+              <div class="pipeline-grid">
+                <div class="pipeline-field" style="grid-column: 1 / -1">
+                  <label for="s_anthropic_key">API key</label>
+                  <input type="password" id="s_anthropic_key" placeholder="sk-ant-..." autocomplete="off" style="font-family:var(--mono);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%;max-width:520px">
+                  <span class="field-hint">Stored in the OS keychain. <span id="s_anthropic_status"></span></span>
+                </div>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;font-size:11px;font-weight:500;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em">
+              <span style="flex:1;height:1px;background:var(--border)"></span> or <span style="flex:1;height:1px;background:var(--border)"></span>
+            </div>
+
+            <div>
+              <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Azure OpenAI</div>
+              <div class="pipeline-grid">
+                <div class="pipeline-field" style="grid-column: 1 / -1">
+                  <label for="s_azure_endpoint">Endpoint URL</label>
+                  <input type="text" id="s_azure_endpoint" placeholder="https://yourresource.openai.azure.com" style="font-family:var(--mono);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%;max-width:520px">
+                  <span class="field-hint">Full endpoint URL from the Azure portal.</span>
+                </div>
+                <div class="pipeline-field">
+                  <label for="s_azure_deployment">Deployment name</label>
+                  <input type="text" id="s_azure_deployment" placeholder="gpt-4o-mini" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                </div>
+                <div class="pipeline-field">
+                  <label for="s_azure_version">API version</label>
+                  <input type="text" id="s_azure_version" placeholder="2024-06-01" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                </div>
+                <div class="pipeline-field" style="grid-column: 1 / -1">
+                  <label for="s_azure_key">API key (primary or secondary)</label>
+                  <input type="password" id="s_azure_key" placeholder="Paste your Azure API key" autocomplete="off" style="font-family:var(--mono);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%;max-width:520px">
+                  <span class="field-hint">Stored in the OS keychain. <span id="s_azure_status"></span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="pipeline-footer">
+            <span class="pipeline-note" id="settingsNote"></span>
+            <span class="pipeline-status" id="settingsStatus"></span>
+            <button class="btn btn-primary" id="saveSettingsBtn" onclick="saveSettings()">Save settings</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PAGE: Team Databases -->
+      <div class="page" id="page-databases">
+        <div class="page-title">Team Databases</div>
+        <div class="card">
+          <form class="add-source-form" id="addDbForm" autocomplete="off">
+            <div class="form-group name-field">
+              <label for="dbName">Name</label>
+              <input type="text" id="dbName" placeholder="e.g. Platform Team" required>
+            </div>
+            <div class="form-group url-field">
+              <label for="dbURI">Connection string</label>
+              <input type="text" id="dbURI" placeholder="mongodb+srv://..." required>
+            </div>
+            <div class="form-group name-field">
+              <label for="dbDatabase">Database</label>
+              <input type="text" id="dbDatabase" placeholder="e.g. platform" required>
+            </div>
+            <button type="submit" class="btn btn-primary" id="addDbBtn">Connect</button>
+          </form>
+          <div class="form-message" id="dbFormMessage" style="display:none"></div>
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Database</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Enabled</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="dbRows">
+              <tr><td colspan="6" class="empty-state">No team databases connected</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- PAGE: Pipeline -->
+      <div class="page" id="page-pipeline">
+        <div class="page-title">Pipeline</div>
+        <div class="card">
+          <!-- Noise filter -->
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Noise filter</div>
+            <div class="pipeline-grid">
+              <div class="pipeline-field">
+                <label for="p_noise_min_len">Min length (chars)</label>
+                <input type="number" id="p_noise_min_len" min="1" max="500" step="1" value="20">
+                <span class="field-hint">Chunks shorter than this are dropped</span>
+              </div>
+              <div class="pipeline-field">
+                <label for="p_noise_min_alnum">Min alphanumeric ratio</label>
+                <input type="number" id="p_noise_min_alnum" min="0" max="1" step="0.05" value="0.4">
+                <span class="field-hint">0 – 1 · e.g. 0.4 = 40% must be letters/digits</span>
+              </div>
+              <div class="pipeline-field">
+                <label for="p_content_score_gate">Content score gate</label>
+                <input type="number" id="p_content_score_gate" min="0" max="1" step="0.05" value="0">
+                <span class="field-hint">0 = disabled · drop chunks scoring below this</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Content scoring prototypes -->
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Content scoring prototypes</div>
+            <div class="pipeline-grid">
+              <div class="pipeline-field pipeline-protos">
+                <label for="p_quality_protos">Quality prototypes (one per line)</label>
+                <textarea id="p_quality_protos" rows="6"></textarea>
+                <span class="field-hint">Chunks semantically close to these score higher. Changes trigger scorer reload.</span>
+              </div>
+              <div class="pipeline-field pipeline-protos">
+                <label for="p_noise_protos">Noise prototypes (one per line)</label>
+                <textarea id="p_noise_protos" rows="4"></textarea>
+                <span class="field-hint">Chunks close to these score lower.</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Deduplication -->
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Deduplication</div>
+            <div class="pipeline-grid">
+              <div class="pipeline-field">
+                <label for="p_dedup_threshold">Dedup threshold</label>
+                <input type="number" id="p_dedup_threshold" min="0.5" max="1" step="0.01" value="0.92">
+                <span class="field-hint">Cosine ≥ this → duplicate, skip</span>
+              </div>
+              <div class="pipeline-field">
+                <label for="p_source_ext_threshold">Source extension threshold</label>
+                <input type="number" id="p_source_ext_threshold" min="0" max="1" step="0.01" value="0.75">
+                <span class="field-hint">Tag as extending a source memory above this score</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Topic grouping -->
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Topic grouping</div>
+            <div class="pipeline-grid">
+              <div class="pipeline-field">
+                <label for="p_topic_boundary">Topic boundary threshold</label>
+                <input type="number" id="p_topic_boundary" min="0" max="1" step="0.05" value="0.65">
+                <span class="field-hint">Cosine below this between consecutive chunks splits a group</span>
+              </div>
+              <div class="pipeline-field">
+                <label for="p_max_group_chars">Max group chars</label>
+                <input type="number" id="p_max_group_chars" min="256" max="16384" step="256" value="2048">
+                <span class="field-hint">Groups are split to stay within this budget</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Steward -->
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Steward <span style="font-weight:400;text-transform:none;letter-spacing:0">(restart required)</span></div>
+            <div class="pipeline-grid">
+              <div class="pipeline-field">
+                <label for="s_interval">Sweep interval (minutes)</label>
+                <input type="number" id="s_interval" min="1" max="1440" step="1" value="60">
+              </div>
+              <div class="pipeline-field">
+                <label for="s_prune_threshold">Prune threshold</label>
+                <input type="number" id="s_prune_threshold" min="0" max="1" step="0.01" value="0.1">
+                <span class="field-hint">Quality score below this → pruned</span>
+              </div>
+              <div class="pipeline-field">
+                <label for="s_merge_threshold">Merge threshold</label>
+                <input type="number" id="s_merge_threshold" min="0.5" max="1" step="0.01" value="0.88">
+                <span class="field-hint">Cosine above this → steward merges memories</span>
+              </div>
+              <div class="pipeline-field">
+                <label for="s_decay_half_days">Decay half-life (days)</label>
+                <input type="number" id="s_decay_half_days" min="1" max="3650" step="1" value="90">
+              </div>
+              <div class="pipeline-field">
+                <label for="s_grace_hours">Grace period (hours)</label>
+                <input type="number" id="s_grace_hours" min="0" max="720" step="1" value="24">
+              </div>
+            </div>
+          </div>
+
+          <div class="pipeline-footer">
+            <span class="pipeline-note" id="pipelineNote"></span>
+            <span class="pipeline-status" id="pipelineStatus"></span>
+            <button class="btn btn-primary" id="savePipelineBtn" onclick="savePipeline()">Save changes</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PAGE: Export -->
+      <div class="page" id="page-export">
+        <div class="page-title">Export</div>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;max-width:640px;line-height:1.6">Download your accumulated knowledge as a Markdown document. Use it to augment project docs, onboarding guides, or team wikis with real insights captured from coding sessions.</p>
+        <div class="card" style="max-width:560px">
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Filter</div>
+            <div class="pipeline-grid">
+              <div class="pipeline-field" style="grid-column: 1 / -1">
+                <label for="export_source">Source</label>
+                <select id="export_source" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                  <option value="">All sources</option>
+                </select>
+                <span class="field-hint">Limit export to memories from a specific source.</span>
+              </div>
+              <div class="pipeline-field">
+                <label for="export_quality">Min quality score</label>
+                <input type="number" id="export_quality" min="0" max="1" step="0.05" value="0" style="font-family:var(--mono);font-size:13px;padding:5px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                <span class="field-hint">0 = include all. Higher values limit to better-scored memories.</span>
+              </div>
+            </div>
+          </div>
+          <div class="pipeline-footer">
+            <span class="pipeline-note" id="exportNote"></span>
+            <span class="pipeline-status" id="exportStatus"></span>
+            <button class="btn btn-primary" id="exportBtn" onclick="doExport()">Download .md</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PAGE: Logs -->
+      <div class="page" id="page-logs">
+        <div class="page-title">Logs</div>
+        <div class="card" style="padding:0;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border)">
+            <div style="display:flex;align-items:center;gap:12px">
+              <label style="font-size:12px;color:var(--text-secondary)">Lines</label>
+              <select id="logLines" style="font-family:var(--font);font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text)">
+                <option value="200">200</option>
+                <option value="500" selected>500</option>
+                <option value="1000">1000</option>
+                <option value="2000">2000</option>
+              </select>
+              <label style="font-size:12px;color:var(--text-secondary)">Filter</label>
+              <input type="text" id="logFilter" placeholder="grep..." style="font-family:var(--mono);font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);width:180px">
+              <label style="font-size:12px;display:flex;align-items:center;gap:4px;color:var(--text-secondary);cursor:pointer">
+                <input type="checkbox" id="logAutoScroll" checked> Auto-scroll
+              </label>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span id="logCount" style="font-size:11px;color:var(--text-secondary)"></span>
+              <button class="btn btn-primary" style="font-size:12px;padding:4px 12px" onclick="loadLogs()">Refresh</button>
+            </div>
+          </div>
+          <pre id="logOutput" style="margin:0;padding:12px 16px;font-family:var(--mono);font-size:12px;line-height:1.6;overflow:auto;max-height:calc(100vh - 240px);background:var(--bg);color:var(--text);white-space:pre-wrap;word-break:break-all"></pre>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -499,13 +690,24 @@ function authFetch(url, opts) {
   return fetch(url, opts);
 }
 
-// --- Tabs ---
+// --- Sidebar page navigation ---
+document.querySelectorAll('.nav-item[data-page]').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    item.classList.add('active');
+    document.getElementById('page-' + item.dataset.page).classList.add('active');
+  });
+});
+
+// --- Inner tabs (within a page) ---
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    const card = tab.closest('.card');
+    card.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    card.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     tab.classList.add('active');
-    document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+    card.querySelector('#tab-' + tab.dataset.tab).classList.add('active');
   });
 });
 
@@ -673,6 +875,9 @@ async function loadDashboard() {
       select.appendChild(opt);
     });
     select.value = currentVal;
+
+    // Populate export source dropdown
+    populateExportSources(sources);
 
     // Sources table
     const sourceBody = document.getElementById('sourceRows');
@@ -1005,12 +1210,176 @@ async function savePipeline() {
   }
 }
 
+// --- Settings ---
+async function loadSettings() {
+  try {
+    const r = await authFetch(BASE + '/api/settings');
+    if (!r.ok) return;
+    const d = await r.json();
+
+    document.getElementById('s_mode').value = d.mode || 'proxy';
+
+    // MongoDB
+    const mongo = d.mongodb || {};
+    document.getElementById('s_mongo_uri').value = '';
+    document.getElementById('s_mongo_uri').placeholder = mongo.uri_masked || 'mongodb+srv://...';
+    document.getElementById('s_mongo_status').textContent = mongo.configured ? '✓ Configured' : '';
+    document.getElementById('s_mongo_status').style.color = mongo.configured ? 'var(--green)' : '';
+
+    // Anthropic
+    const anth = d.anthropic || {};
+    document.getElementById('s_anthropic_key').value = '';
+    document.getElementById('s_anthropic_key').placeholder = anth.key_masked || 'sk-ant-...';
+    document.getElementById('s_anthropic_status').textContent = anth.configured ? '✓ Configured' : '';
+    document.getElementById('s_anthropic_status').style.color = anth.configured ? 'var(--green)' : '';
+
+    // Azure
+    const az = d.azure || {};
+    document.getElementById('s_azure_endpoint').value = az.endpoint || '';
+    document.getElementById('s_azure_deployment').value = az.deployment || '';
+    document.getElementById('s_azure_version').value = az.api_version || '';
+    document.getElementById('s_azure_key').value = '';
+    document.getElementById('s_azure_key').placeholder = az.key_masked || 'Paste your Azure API key';
+    document.getElementById('s_azure_status').textContent = az.configured ? '✓ Configured' : '';
+    document.getElementById('s_azure_status').style.color = az.configured ? 'var(--green)' : '';
+  } catch(e) {
+    console.error('Settings load failed:', e);
+  }
+}
+
+async function saveSettings() {
+  const btn = document.getElementById('saveSettingsBtn');
+  const status = document.getElementById('settingsStatus');
+  const note = document.getElementById('settingsNote');
+
+  btn.disabled = true;
+  status.className = 'pipeline-status';
+  status.textContent = 'Saving…';
+  note.textContent = '';
+
+  const payload = {};
+
+  // Mode — always send.
+  payload.mode = document.getElementById('s_mode').value;
+
+  // MongoDB URI — only send if user typed something.
+  const mongoURI = document.getElementById('s_mongo_uri').value.trim();
+  if (mongoURI) payload.mongo_uri = mongoURI;
+
+  // Anthropic key — only send if user typed something.
+  const anthropicKey = document.getElementById('s_anthropic_key').value.trim();
+  if (anthropicKey) payload.anthropic_key = anthropicKey;
+
+  // Azure — send endpoint/deployment/version if any field has a value.
+  const azEndpoint = document.getElementById('s_azure_endpoint').value.trim();
+  const azDeploy = document.getElementById('s_azure_deployment').value.trim();
+  const azVersion = document.getElementById('s_azure_version').value.trim();
+  const azKey = document.getElementById('s_azure_key').value.trim();
+  if (azEndpoint) payload.azure_endpoint = azEndpoint;
+  if (azDeploy) payload.azure_deployment = azDeploy;
+  if (azVersion) payload.azure_api_version = azVersion;
+  if (azKey) payload.azure_key = azKey;
+
+  try {
+    const r = await authFetch(BASE + '/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const j = await r.json();
+    if (r.ok) {
+      status.className = 'pipeline-status success';
+      status.textContent = '✓ Saved';
+      if (j.need_restart) {
+        note.textContent = 'Restart the daemon for changes to take effect.';
+      }
+      // Refresh settings to show updated masked values.
+      setTimeout(loadSettings, 500);
+    } else {
+      status.className = 'pipeline-status error';
+      status.textContent = j.error || 'Save failed';
+    }
+  } catch(e) {
+    status.className = 'pipeline-status error';
+    status.textContent = 'Request failed: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    setTimeout(() => { status.textContent = ''; note.textContent = ''; }, 8000);
+  }
+}
+
+// --- Export ---
+function populateExportSources(sources) {
+  const sel = document.getElementById('export_source');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All sources</option>';
+  // Add "captured" for agent-captured memories.
+  const opt0 = document.createElement('option');
+  opt0.value = 'claude-code';
+  opt0.textContent = 'Agent-captured';
+  sel.appendChild(opt0);
+  (sources || []).forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = 'source:' + s.name;
+    opt.textContent = s.name + ' (' + s.memory_count + ' memories)';
+    sel.appendChild(opt);
+  });
+  sel.value = cur;
+}
+
+async function doExport() {
+  const btn = document.getElementById('exportBtn');
+  const status = document.getElementById('exportStatus');
+  const note = document.getElementById('exportNote');
+  btn.disabled = true;
+  btn.textContent = 'Exporting...';
+  status.textContent = '';
+  note.textContent = '';
+
+  const source = document.getElementById('export_source').value;
+  const minQ = document.getElementById('export_quality').value;
+
+  const params = new URLSearchParams();
+  if (source) params.set('source', source);
+  if (minQ && parseFloat(minQ) > 0) params.set('min_quality', minQ);
+
+  try {
+    const r = await authFetch(BASE + '/api/export?' + params.toString());
+    const ct = r.headers.get('content-type') || '';
+    if (ct.includes('text/markdown')) {
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'memoryd-export.md';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      status.className = 'pipeline-status success';
+      status.textContent = '\u2713 Downloaded';
+    } else {
+      const j = await r.json();
+      status.className = 'pipeline-status error';
+      status.textContent = j.error || 'Export failed';
+    }
+  } catch(e) {
+    status.className = 'pipeline-status error';
+    status.textContent = 'Request failed: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Download .md';
+    setTimeout(() => { status.textContent = ''; }, 5000);
+  }
+}
+
 // Init
 checkHealth();
 loadDashboard();
 loadKnowledge();
 loadDatabases();
 loadPipelineConfig();
+loadSettings();
 setInterval(checkHealth, 10000);
 setInterval(loadDashboard, 15000);
 setInterval(loadDatabases, 15000);
@@ -1124,6 +1493,50 @@ document.getElementById('addDbForm').addEventListener('submit', async (e) => {
     btn.disabled = false;
     btn.textContent = 'Connect';
   }
+});
+
+// --- Logs ---
+let _logAutoRefresh = null;
+async function loadLogs() {
+  try {
+    const n = document.getElementById('logLines').value || 500;
+    const r = await authFetch(BASE + '/api/logs?lines=' + n);
+    const j = await r.json();
+    const lines = j.lines || [];
+    const filter = (document.getElementById('logFilter').value || '').toLowerCase();
+    const filtered = filter ? lines.filter(l => l.toLowerCase().includes(filter)) : lines;
+    const out = document.getElementById('logOutput');
+    out.innerHTML = filtered.map(escapeLogLine).join('\n');
+    document.getElementById('logCount').textContent = filtered.length + (filter ? ' / ' + lines.length : '') + ' lines';
+    if (document.getElementById('logAutoScroll').checked) {
+      out.scrollTop = out.scrollHeight;
+    }
+  } catch(e) {
+    document.getElementById('logOutput').textContent = 'Failed to load logs: ' + e.message;
+  }
+}
+function escapeLogLine(line) {
+  const esc = line.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  if (/\b(error|panic|fatal)\b/i.test(line)) return '<span style="color:#ef4444">' + esc + '</span>';
+  if (/\b(warn|warning)\b/i.test(line)) return '<span style="color:#f59e0b">' + esc + '</span>';
+  return esc;
+}
+// Auto-refresh logs when the logs page is active
+document.getElementById('logFilter').addEventListener('input', loadLogs);
+document.getElementById('logLines').addEventListener('change', loadLogs);
+// Start/stop auto-refresh based on active page
+function updateLogAutoRefresh() {
+  const logsActive = document.getElementById('page-logs').classList.contains('active');
+  if (logsActive && !_logAutoRefresh) {
+    loadLogs();
+    _logAutoRefresh = setInterval(loadLogs, 3000);
+  } else if (!logsActive && _logAutoRefresh) {
+    clearInterval(_logAutoRefresh);
+    _logAutoRefresh = null;
+  }
+}
+document.querySelectorAll('.nav-item[data-page]').forEach(item => {
+  item.addEventListener('click', updateLogAutoRefresh);
 });
 </script>
 </body>

@@ -28,16 +28,21 @@ type ConversationTurn struct {
 	Content string
 }
 
-// Synthesizer calls the Anthropic API to synthesize fragmented text into
+// backend abstracts the LLM completion call so the Synthesizer works
+// with both Anthropic and Azure OpenAI.
+type backend interface {
+	complete(ctx context.Context, model string, maxTokens int, prompt string) (string, error)
+	available() bool
+}
+
+// Synthesizer calls an LLM to synthesize fragmented text into
 // coherent, standalone memory entries. All methods are nil-safe — a nil
 // Synthesizer is a no-op and Available() returns false.
 type Synthesizer struct {
-	apiKey    string
-	baseURL   string
+	be        backend
 	model     string
 	maxTokens int
 	minChunks int
-	client    *http.Client
 }
 
 // Option configures a Synthesizer.
@@ -59,16 +64,18 @@ func WithMinChunks(n int) Option {
 	return func(s *Synthesizer) { s.minChunks = n }
 }
 
-// New creates a Synthesizer. Pass an empty apiKey to disable synthesis
-// (Available() will return false).
+// New creates a Synthesizer using the Anthropic API. Pass an empty apiKey
+// to disable synthesis (Available() will return false).
 func New(apiKey, baseURL string, opts ...Option) *Synthesizer {
 	s := &Synthesizer{
-		apiKey:    apiKey,
-		baseURL:   strings.TrimRight(baseURL, "/"),
+		be: &anthropicBackend{
+			apiKey:  apiKey,
+			baseURL: strings.TrimRight(baseURL, "/"),
+			client:  &http.Client{},
+		},
 		model:     defaultModel,
 		maxTokens: defaultMaxTokens,
 		minChunks: defaultMinChunks,
-		client:    &http.Client{},
 	}
 	for _, o := range opts {
 		o(s)
@@ -76,9 +83,184 @@ func New(apiKey, baseURL string, opts ...Option) *Synthesizer {
 	return s
 }
 
-// Available returns true when synthesis is possible (non-nil, API key set).
+// AzureConfig holds the connection parameters for Azure OpenAI.
+type AzureConfig struct {
+	Endpoint   string // e.g. https://myresource.openai.azure.com
+	Deployment string // deployment name in Azure portal
+	APIVersion string // e.g. 2024-06-01
+	APIKey     string // primary or secondary key
+}
+
+// NewAzure creates a Synthesizer using Azure OpenAI. Pass an empty APIKey
+// to disable synthesis.
+func NewAzure(cfg AzureConfig, opts ...Option) *Synthesizer {
+	s := &Synthesizer{
+		be: &azureBackend{
+			endpoint:   strings.TrimRight(cfg.Endpoint, "/"),
+			deployment: cfg.Deployment,
+			apiVersion: cfg.APIVersion,
+			apiKey:     cfg.APIKey,
+			client:     &http.Client{},
+		},
+		model:     cfg.Deployment, // Azure uses deployment name as the model label
+		maxTokens: defaultMaxTokens,
+		minChunks: defaultMinChunks,
+	}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
+}
+
+// Available returns true when synthesis is possible (non-nil, backend ready).
 func (s *Synthesizer) Available() bool {
-	return s != nil && s.apiKey != ""
+	return s != nil && s.be != nil && s.be.available()
+}
+
+// complete dispatches to the configured backend.
+func (s *Synthesizer) complete(ctx context.Context, prompt string) (string, error) {
+	return s.be.complete(ctx, s.model, s.maxTokens, prompt)
+}
+
+// ---------------------------------------------------------------------------
+// Anthropic backend
+// ---------------------------------------------------------------------------
+
+type anthropicBackend struct {
+	apiKey  string
+	baseURL string
+	client  *http.Client
+}
+
+func (ab *anthropicBackend) available() bool {
+	return ab.apiKey != ""
+}
+
+func (ab *anthropicBackend) complete(ctx context.Context, model string, maxTokens int, prompt string) (string, error) {
+	reqBody, err := json.Marshal(map[string]any{
+		"model":      model,
+		"max_tokens": maxTokens,
+		"messages": []map[string]any{
+			{"role": "user", "content": prompt},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("synthesizer: marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST",
+		ab.baseURL+"/v1/messages", bytes.NewReader(reqBody))
+	if err != nil {
+		return "", fmt.Errorf("synthesizer: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", ab.apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := ab.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("synthesizer: API call: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("synthesizer: read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("synthesizer: API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("synthesizer: parse response: %w", err)
+	}
+
+	var parts []string
+	for _, block := range result.Content {
+		if block.Type == "text" && block.Text != "" {
+			parts = append(parts, block.Text)
+		}
+	}
+	if len(parts) == 0 {
+		return "", fmt.Errorf("synthesizer: empty response")
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n")), nil
+}
+
+// ---------------------------------------------------------------------------
+// Azure OpenAI backend
+// ---------------------------------------------------------------------------
+
+type azureBackend struct {
+	endpoint   string
+	deployment string
+	apiVersion string
+	apiKey     string
+	client     *http.Client
+}
+
+func (az *azureBackend) available() bool {
+	return az.apiKey != "" && az.endpoint != "" && az.deployment != ""
+}
+
+func (az *azureBackend) complete(ctx context.Context, _ string, maxTokens int, prompt string) (string, error) {
+	reqBody, err := json.Marshal(map[string]any{
+		"max_tokens": maxTokens,
+		"messages": []map[string]any{
+			{"role": "user", "content": prompt},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("synthesizer: marshal request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/openai/deployments/%s/chat/completions?api-version=%s",
+		az.endpoint, az.deployment, az.apiVersion)
+
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
+	if err != nil {
+		return "", fmt.Errorf("synthesizer: build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("api-key", az.apiKey)
+
+	resp, err := az.client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("synthesizer: API call: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("synthesizer: read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("synthesizer: API error %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", fmt.Errorf("synthesizer: parse response: %w", err)
+	}
+
+	if len(result.Choices) == 0 || result.Choices[0].Message.Content == "" {
+		return "", fmt.Errorf("synthesizer: empty response")
+	}
+	return strings.TrimSpace(result.Choices[0].Message.Content), nil
 }
 
 // Synthesize merges a set of related text chunks into a single coherent entry.
@@ -219,63 +401,4 @@ Conversation:
 %s`, convBuf.String())
 
 	return s.complete(ctx, prompt)
-}
-
-// complete sends a prompt to the Anthropic messages API and returns the response text.
-func (s *Synthesizer) complete(ctx context.Context, prompt string) (string, error) {
-	reqBody, err := json.Marshal(map[string]any{
-		"model":      s.model,
-		"max_tokens": s.maxTokens,
-		"messages": []map[string]any{
-			{"role": "user", "content": prompt},
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("synthesizer: marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST",
-		s.baseURL+"/v1/messages", bytes.NewReader(reqBody))
-	if err != nil {
-		return "", fmt.Errorf("synthesizer: build request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", s.apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("synthesizer: API call: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("synthesizer: read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("synthesizer: API error %d: %s", resp.StatusCode, string(body))
-	}
-
-	var result struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(body, &result); err != nil {
-		return "", fmt.Errorf("synthesizer: parse response: %w", err)
-	}
-
-	var parts []string
-	for _, block := range result.Content {
-		if block.Type == "text" && block.Text != "" {
-			parts = append(parts, block.Text)
-		}
-	}
-	if len(parts) == 0 {
-		return "", fmt.Errorf("synthesizer: empty response")
-	}
-	return strings.TrimSpace(strings.Join(parts, "\n")), nil
 }

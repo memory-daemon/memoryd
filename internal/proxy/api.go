@@ -1,15 +1,20 @@
 package proxy
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/memory-daemon/memoryd/internal/config"
+	"github.com/memory-daemon/memoryd/internal/credential"
 	"github.com/memory-daemon/memoryd/internal/embedding"
 	"github.com/memory-daemon/memoryd/internal/pipeline"
 	"github.com/memory-daemon/memoryd/internal/quality"
@@ -44,6 +49,9 @@ func registerAPI(mux *http.ServeMux, st store.Store, read *pipeline.ReadPipeline
 	mux.HandleFunc("/api/databases/", h.handleDatabaseByName)
 	mux.HandleFunc("/api/pipeline", h.handlePipelineConfig)
 	mux.HandleFunc("/api/rejections", h.handleRejections)
+	mux.HandleFunc("/api/settings", h.handleSettings)
+	mux.HandleFunc("/api/export", h.handleExport)
+	mux.HandleFunc("/api/logs", handleLogs)
 }
 
 func (a *apiHandler) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -165,12 +173,6 @@ func (a *apiHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	// Quality gate: requires synthesizer.
-	if !a.synth.Available() {
-		writeJSON(w, 200, map[string]any{"stage": "no_synthesizer", "stored": 0})
-		return
-	}
-
 	pCfg := a.write.Config()
 
 	// --- Pre-Haiku gates (ordered cheapest → most expensive) ---
@@ -202,25 +204,41 @@ func (a *apiHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// --- Haiku LLM quality gate ---
-	entry, err := a.synth.SynthesizeQA(ctx, req.UserPrompt, req.AssistantResponse)
-	if err != nil {
-		writeJSON(w, 500, map[string]string{"error": "synthesis error: " + err.Error()})
-		return
-	}
-	if entry == "" {
-		a.rejLog.Add(rejection.StageSynthesizer, req.UserPrompt, req.AssistantResponse)
-		writeJSON(w, 200, map[string]any{"stage": "synthesizer_skip", "stored": 0})
-		return
-	}
+	// --- Haiku LLM quality gate (when available) or raw storage fallback ---
+	if a.synth.Available() {
+		entry, err := a.synth.SynthesizeQA(ctx, req.UserPrompt, req.AssistantResponse)
+		if err != nil {
+			writeJSON(w, 500, map[string]string{"error": "synthesis error: " + err.Error()})
+			return
+		}
+		if entry == "" {
+			a.rejLog.Add(rejection.StageSynthesizer, req.UserPrompt, req.AssistantResponse)
+			writeJSON(w, 200, map[string]any{"stage": "synthesizer_skip", "stored": 0})
+			return
+		}
 
-	result := a.write.ProcessDirect(entry, req.Source, nil)
-	writeJSON(w, 200, map[string]any{
-		"stage":   "stored",
-		"stored":  result.Stored,
-		"entry":   entry,
-		"summary": result.Summary(),
-	})
+		result := a.write.ProcessDirect(entry, req.Source, nil)
+		writeJSON(w, 200, map[string]any{
+			"stage":   "stored",
+			"stored":  result.Stored,
+			"entry":   entry,
+			"summary": result.Summary(),
+		})
+	} else {
+		// No synthesizer — store raw Q&A through the chunking pipeline.
+		var text string
+		if req.UserPrompt != "" {
+			text = fmt.Sprintf("Q: %s\n\nA: %s", req.UserPrompt, req.AssistantResponse)
+		} else {
+			text = req.AssistantResponse
+		}
+		result := a.write.ProcessFiltered(text, req.Source, nil)
+		writeJSON(w, 200, map[string]any{
+			"stage":   "stored_raw",
+			"stored":  result.Stored,
+			"summary": result.Summary(),
+		})
+	}
 }
 
 func (a *apiHandler) handleMemories(w http.ResponseWriter, r *http.Request) {
@@ -585,6 +603,166 @@ func (a *apiHandler) handleRejections(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleSettings handles GET/POST /api/settings.
+// GET returns current configuration state (credentials are masked).
+// POST updates credentials (keychain) and config (disk), then signals
+// that a daemon restart is recommended.
+func (a *apiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		anthropicKey := config.GetAnthropicAPIKey()
+		azureKey := config.GetAzureAPIKey()
+		mongoURI, _ := credential.Get("mongodb_atlas_uri")
+
+		writeJSON(w, 200, map[string]any{
+			"mode": a.cfg.Mode,
+			"mongodb": map[string]any{
+				"configured": mongoURI != "",
+				"uri_masked": maskCredential(mongoURI),
+			},
+			"anthropic": map[string]any{
+				"configured": anthropicKey != "",
+				"key_masked": maskCredential(anthropicKey),
+			},
+			"azure": map[string]any{
+				"configured":  azureKey != "",
+				"key_masked":  maskCredential(azureKey),
+				"endpoint":    a.cfg.Azure.Endpoint,
+				"deployment":  a.cfg.Azure.Deployment,
+				"api_version": a.cfg.Azure.APIVersion,
+			},
+			"synthesis": a.synth != nil && a.synth.Available(),
+		})
+
+	case http.MethodPost:
+		var req struct {
+			Mode            *string `json:"mode,omitempty"`
+			MongoURI        *string `json:"mongo_uri,omitempty"`
+			AnthropicKey    *string `json:"anthropic_key,omitempty"`
+			AzureKey        *string `json:"azure_key,omitempty"`
+			AzureEndpoint   *string `json:"azure_endpoint,omitempty"`
+			AzureDeployment *string `json:"azure_deployment,omitempty"`
+			AzureAPIVersion *string `json:"azure_api_version,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+			return
+		}
+
+		var changes []string
+		needRestart := false
+
+		// Mode.
+		if req.Mode != nil {
+			if !config.ValidMode(*req.Mode) {
+				writeJSON(w, 400, map[string]string{"error": "invalid mode: must be proxy, mcp, or mcp-readonly"})
+				return
+			}
+			if err := config.SetMode(*req.Mode); err != nil {
+				writeJSON(w, 500, map[string]string{"error": "failed to save mode: " + err.Error()})
+				return
+			}
+			a.cfg.Mode = *req.Mode
+			changes = append(changes, "mode")
+			needRestart = true
+		}
+
+		// MongoDB URI.
+		if req.MongoURI != nil {
+			if *req.MongoURI == "" {
+				_ = credential.Delete("mongodb_atlas_uri")
+				changes = append(changes, "mongodb_uri removed")
+			} else {
+				if err := config.StoreCredential("mongodb_atlas_uri", *req.MongoURI); err != nil {
+					writeJSON(w, 500, map[string]string{"error": "failed to save MongoDB URI: " + err.Error()})
+					return
+				}
+				changes = append(changes, "mongodb_uri")
+			}
+			needRestart = true
+		}
+
+		// Anthropic API key.
+		if req.AnthropicKey != nil {
+			if *req.AnthropicKey == "" {
+				_ = credential.Delete("anthropic_api_key")
+				changes = append(changes, "anthropic_key removed")
+			} else {
+				if err := credential.Set("anthropic_api_key", *req.AnthropicKey); err != nil {
+					writeJSON(w, 500, map[string]string{"error": "failed to save Anthropic key: " + err.Error()})
+					return
+				}
+				changes = append(changes, "anthropic_key")
+			}
+			needRestart = true
+		}
+
+		// Azure OpenAI.
+		azureChanged := false
+		azureCfg := a.cfg.Azure
+		if req.AzureEndpoint != nil {
+			azureCfg.Endpoint = *req.AzureEndpoint
+			azureChanged = true
+		}
+		if req.AzureDeployment != nil {
+			azureCfg.Deployment = *req.AzureDeployment
+			azureChanged = true
+		}
+		if req.AzureAPIVersion != nil {
+			azureCfg.APIVersion = *req.AzureAPIVersion
+			azureChanged = true
+		}
+		if req.AzureKey != nil {
+			if *req.AzureKey == "" {
+				_ = credential.Delete("azure_openai_api_key")
+				changes = append(changes, "azure_key removed")
+			} else {
+				if err := credential.Set("azure_openai_api_key", *req.AzureKey); err != nil {
+					writeJSON(w, 500, map[string]string{"error": "failed to save Azure key: " + err.Error()})
+					return
+				}
+				changes = append(changes, "azure_key")
+			}
+			azureChanged = true
+		}
+		if azureChanged {
+			if err := config.SaveAzureConfig(azureCfg); err != nil {
+				writeJSON(w, 500, map[string]string{"error": "failed to save Azure config: " + err.Error()})
+				return
+			}
+			a.cfg.Azure = azureCfg
+			changes = append(changes, "azure")
+			needRestart = true
+		}
+
+		resp := map[string]any{
+			"status":       "ok",
+			"changes":      changes,
+			"need_restart": needRestart,
+		}
+		if needRestart {
+			resp["message"] = "Settings saved. Restart the daemon for changes to take effect."
+		}
+		writeJSON(w, 200, resp)
+
+	default:
+		writeJSON(w, 405, map[string]string{"error": "method not allowed"})
+	}
+}
+
+// maskCredential returns a masked version of a credential for display.
+func maskCredential(s string) string {
+	if s == "" {
+		return ""
+	}
+	if len(s) <= 12 {
+		return "••••••••"
+	}
+	return s[:4] + "••••" + s[len(s)-4:]
+}
+
 // strSlicesEqual returns true if two string slices have identical contents.
 func strSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
@@ -596,6 +774,114 @@ func strSlicesEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// handleExport handles GET /api/export — generates a markdown document from memories.
+func (a *apiHandler) handleExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(w, 405, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	source := r.URL.Query().Get("source")
+	minQuality := 0.0
+	if v := r.URL.Query().Get("min_quality"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			minQuality = f
+		}
+	}
+
+	// Fetch memories.
+	var memories []store.Memory
+	var err error
+	if source != "" {
+		memories, err = a.store.ListBySource(ctx, source, 10000)
+	} else {
+		memories, err = a.store.List(ctx, "", 10000)
+	}
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(w, 500, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Quality filter.
+	if minQuality > 0 {
+		var filtered []store.Memory
+		for _, m := range memories {
+			if m.QualityScore >= minQuality {
+				filtered = append(filtered, m)
+			}
+		}
+		memories = filtered
+	}
+
+	if len(memories) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		writeJSON(w, 200, map[string]string{"error": "no memories match the filter"})
+		return
+	}
+
+	// Group by source.
+	groups := map[string][]store.Memory{}
+	for _, m := range memories {
+		src := m.Source
+		if src == "" {
+			src = "captured"
+		}
+		groups[src] = append(groups[src], m)
+	}
+
+	// Build markdown.
+	var sb strings.Builder
+	title := "memoryd Knowledge Export"
+	if source != "" {
+		title = "memoryd Export: " + source
+	}
+	sb.WriteString("# " + title + "\n\n")
+	sb.WriteString(fmt.Sprintf("> %d memories across %d sources | exported %s\n\n",
+		len(memories), len(groups), time.Now().Format("2006-01-02 15:04")))
+
+	// Sort sources for stable output.
+	var srcKeys []string
+	for k := range groups {
+		srcKeys = append(srcKeys, k)
+	}
+	sort.Strings(srcKeys)
+
+	for _, src := range srcKeys {
+		mems := groups[src]
+		sb.WriteString("## " + src + "\n\n")
+		for _, m := range mems {
+			sb.WriteString("### " + exportFirstLine(m.Content) + "\n\n")
+			sb.WriteString(m.Content + "\n\n")
+			if m.QualityScore > 0 || m.HitCount > 0 {
+				sb.WriteString(fmt.Sprintf("_quality: %.2f | hits: %d | created: %s_\n\n",
+					m.QualityScore, m.HitCount, m.CreatedAt.Format("2006-01-02")))
+			}
+			sb.WriteString("---\n\n")
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"memoryd-export.md\"")
+	w.WriteHeader(200)
+	w.Write([]byte(sb.String()))
+}
+
+func exportFirstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		s = s[:idx]
+	}
+	if len(s) > 80 {
+		s = s[:77] + "..."
+	}
+	return s
 }
 
 // persistDatabases saves the current secondary database list to config.
@@ -618,4 +904,47 @@ func (a *apiHandler) persistDatabases() {
 	if err := config.SaveDatabases(cfgDBs); err != nil {
 		fmt.Printf("[api] warning: failed to persist database config: %v\n", err)
 	}
+}
+
+// handleLogs returns the last N lines of ~/.memoryd/daemon.log.
+// Query params:
+//   - lines: number of lines to return (default 500, max 5000)
+func handleLogs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		writeJSON(w, 405, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	n := 500
+	if s := r.URL.Query().Get("lines"); s != "" {
+		if v, err := strconv.Atoi(s); err == nil && v > 0 {
+			n = v
+			if n > 5000 {
+				n = 5000
+			}
+		}
+	}
+
+	logPath := filepath.Join(config.Dir(), "daemon.log")
+	f, err := os.Open(logPath)
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"lines": []string{}, "error": "log file not available"})
+		return
+	}
+	defer f.Close()
+
+	var all []string
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
+	for scanner.Scan() {
+		all = append(all, scanner.Text())
+	}
+
+	// Return last n lines
+	if len(all) > n {
+		all = all[len(all)-n:]
+	}
+
+	writeJSON(w, 200, map[string]any{"lines": all, "total": len(all)})
 }

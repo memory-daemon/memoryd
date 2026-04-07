@@ -86,6 +86,7 @@ type Config struct {
 	UpstreamAnthropicURL string           `yaml:"upstream_anthropic_url"`
 	AtlasMode            bool             `yaml:"atlas_mode"`
 	LLMSynthesis         bool             `yaml:"llm_synthesis"`
+	Azure                AzureConfig      `yaml:"azure"`
 	Steward              StewardConfig    `yaml:"steward"`
 	Pipeline             PipelineConfig   `yaml:"pipeline"`
 }
@@ -127,6 +128,13 @@ type StewardConfig struct {
 	DecayHalfDays    int     `yaml:"decay_half_days"    json:"decay_half_days"`
 	MergeThreshold   float64 `yaml:"merge_threshold"    json:"merge_threshold"`
 	BatchSize        int     `yaml:"batch_size"         json:"batch_size"`
+}
+
+// AzureConfig holds Azure OpenAI connection details for LLM synthesis.
+type AzureConfig struct {
+	Endpoint   string `yaml:"endpoint"    json:"endpoint"`    // e.g. https://myresource.openai.azure.com
+	Deployment string `yaml:"deployment"  json:"deployment"`  // deployment name (model label in Azure portal)
+	APIVersion string `yaml:"api_version" json:"api_version"` // e.g. 2024-06-01
 }
 
 var Default = Config{
@@ -357,6 +365,31 @@ func SaveStewardConfig(stewardCfg StewardConfig) error {
 	return os.WriteFile(Path(), out, 0600)
 }
 
+// SaveAzureConfig persists the Azure OpenAI config to the config file.
+func SaveAzureConfig(azureCfg AzureConfig) error {
+	cfg := Default
+	data, err := os.ReadFile(Path())
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading config: %w", err)
+	}
+	if err == nil {
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return fmt.Errorf("parsing config: %w", err)
+		}
+	}
+
+	cfg.Azure = azureCfg
+	out, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+
+	if err := EnsureDir(); err != nil {
+		return err
+	}
+	return os.WriteFile(Path(), out, 0600)
+}
+
 func expandHome(path string) string {
 	if len(path) > 0 && path[0] == '~' {
 		home, _ := os.UserHomeDir()
@@ -423,10 +456,20 @@ func GetAnthropicAPIKey() string {
 	return os.Getenv("ANTHROPIC_API_KEY")
 }
 
+// GetAzureAPIKey returns the Azure OpenAI API key, checking the OS
+// keychain first, then falling back to AZURE_OPENAI_API_KEY env var.
+func GetAzureAPIKey() string {
+	if key, err := credential.Get("azure_openai_api_key"); err == nil && key != "" {
+		return key
+	}
+	return os.Getenv("AZURE_OPENAI_API_KEY")
+}
+
 // DeleteCredentials removes all memoryd credentials from the OS keychain.
 func DeleteCredentials() {
 	_ = credential.Delete("mongodb_atlas_uri")
 	_ = credential.Delete("anthropic_api_key")
+	_ = credential.Delete("azure_openai_api_key")
 	// Also clean up any per-database URI credentials.
 	cfg := Default
 	data, _ := os.ReadFile(Path())

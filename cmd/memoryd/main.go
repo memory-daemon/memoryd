@@ -228,11 +228,27 @@ func startCmd() *cobra.Command {
 
 				if cfg.LLMSynthesis {
 					apiKey := config.GetAnthropicAPIKey()
-					synth = synthesizer.New(apiKey, cfg.UpstreamAnthropicURL)
-					if synth.Available() {
-						log.Printf("LLM synthesis enabled (model: claude-haiku-4-5-20251001)")
-					} else {
-						log.Printf("LLM synthesis: enabled in config but no Anthropic API key found — disabled")
+					azureKey := config.GetAzureAPIKey()
+
+					switch {
+					case apiKey != "":
+						synth = synthesizer.New(apiKey, cfg.UpstreamAnthropicURL)
+						log.Printf("LLM synthesis enabled (Anthropic, model: claude-haiku-4-5-20251001)")
+					case azureKey != "" && cfg.Azure.Endpoint != "" && cfg.Azure.Deployment != "":
+						apiVersion := cfg.Azure.APIVersion
+						if apiVersion == "" {
+							apiVersion = "2024-06-01"
+						}
+						synth = synthesizer.NewAzure(synthesizer.AzureConfig{
+							Endpoint:   cfg.Azure.Endpoint,
+							Deployment: cfg.Azure.Deployment,
+							APIVersion: apiVersion,
+							APIKey:     azureKey,
+						})
+						log.Printf("LLM synthesis enabled (Azure OpenAI, deployment: %s)", cfg.Azure.Deployment)
+					default:
+						synth = synthesizer.New("", "")
+						log.Printf("LLM synthesis: enabled in config but no API key found (set ANTHROPIC_API_KEY or AZURE_OPENAI_API_KEY) — disabled")
 					}
 				} else {
 					synth = synthesizer.New("", "")
@@ -315,6 +331,30 @@ func startCmd() *cobra.Command {
 				}
 			}
 
+			// Build server options — may be nil if MongoDB isn't connected yet.
+			// The proxy handles nil store gracefully (no dashboard/API, passthrough only).
+			var serverOpts []proxy.ServerOption
+			serverOpts = append(serverOpts, proxy.WithMongoStatus(mongoStatusFn))
+
+			wiredMu.Lock()
+			if multi != nil {
+				serverOpts = append(serverOpts,
+					proxy.WithStore(multi),
+					proxy.WithSourceStore(multi.Primary().Mongo),
+					proxy.WithEmbedder(emb),
+					proxy.WithSynthesizer(synth),
+					proxy.WithRejectionLog(rejLog),
+					proxy.WithQuality(qt),
+					proxy.WithIngester(ing),
+				)
+				if len(stewards) > 0 {
+					serverOpts = append(serverOpts, proxy.WithStewardStats(&stewardAdapter{stewards: stewards}))
+				}
+			}
+			wiredMu.Unlock()
+
+			srv := proxy.NewServer(cfg, version, read, write, serverOpts...)
+
 			// If MongoDB failed, retry in the background.
 			if connErr != nil {
 				go func() {
@@ -349,6 +389,22 @@ func startCmd() *cobra.Command {
 							wiredMu.Unlock()
 							continue
 						}
+
+						// Rewire the running server with the full pipeline.
+						var rewireOpts []proxy.ServerOption
+						rewireOpts = append(rewireOpts,
+							proxy.WithStore(multi),
+							proxy.WithSourceStore(multi.Primary().Mongo),
+							proxy.WithEmbedder(emb),
+							proxy.WithSynthesizer(synth),
+							proxy.WithRejectionLog(rejLog),
+							proxy.WithQuality(qt),
+							proxy.WithIngester(ing),
+						)
+						if len(stewards) > 0 {
+							rewireOpts = append(rewireOpts, proxy.WithStewardStats(&stewardAdapter{stewards: stewards}))
+						}
+						srv.Rewire(read, write, rewireOpts...)
 						wiredMu.Unlock()
 
 						log.Println("Full pipeline active — memoryd is fully operational")
@@ -356,30 +412,6 @@ func startCmd() *cobra.Command {
 					}
 				}()
 			}
-
-			// Build server options — may be nil if MongoDB isn't connected yet.
-			// The proxy handles nil store gracefully (no dashboard/API, passthrough only).
-			var serverOpts []proxy.ServerOption
-			serverOpts = append(serverOpts, proxy.WithMongoStatus(mongoStatusFn))
-
-			wiredMu.Lock()
-			if multi != nil {
-				serverOpts = append(serverOpts,
-					proxy.WithStore(multi),
-					proxy.WithSourceStore(multi.Primary().Mongo),
-					proxy.WithEmbedder(emb),
-					proxy.WithSynthesizer(synth),
-					proxy.WithRejectionLog(rejLog),
-					proxy.WithQuality(qt),
-					proxy.WithIngester(ing),
-				)
-				if len(stewards) > 0 {
-					serverOpts = append(serverOpts, proxy.WithStewardStats(&stewardAdapter{stewards: stewards}))
-				}
-			}
-			wiredMu.Unlock()
-
-			srv := proxy.NewServer(cfg, version, read, write, serverOpts...)
 
 			// Graceful shutdown on SIGINT / SIGTERM
 			sigCh := make(chan os.Signal, 1)

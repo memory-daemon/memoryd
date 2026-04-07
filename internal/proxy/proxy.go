@@ -26,6 +26,7 @@ type Server struct {
 	mode        string
 	startedAt   time.Time
 	mongoStatus func() string // optional: returns "connected", "connecting", etc.
+	cfg         *config.Config
 }
 
 type serverOpts struct {
@@ -162,6 +163,7 @@ func NewServer(cfg *config.Config, version string, read *pipeline.ReadPipeline, 
 		mode:        mode,
 		startedAt:   startedAt,
 		mongoStatus: so.mongoStatus,
+		cfg:         cfg,
 	}
 }
 
@@ -186,4 +188,61 @@ func (s *Server) Stop() error {
 // (e.g. 5s) so the process doesn't hang waiting for streaming responses.
 func (s *Server) Shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
+}
+
+// Rewire rebuilds the HTTP handler with new pipeline components. This is
+// called after a delayed MongoDB connection succeeds and the full pipeline
+// is wired up. The swap is atomic per-request — in-flight requests finish
+// on the old handler, new requests use the new one.
+func (s *Server) Rewire(read *pipeline.ReadPipeline, write *pipeline.WritePipeline, opts ...ServerOption) {
+	var so serverOpts
+	so.mongoStatus = s.mongoStatus
+	for _, o := range opts {
+		o(&so)
+	}
+
+	mux := http.NewServeMux()
+	client := &http.Client{}
+
+	mux.Handle("/v1/messages", newAnthropicHandler(s.cfg.UpstreamAnthropicURL, write, client, s.cfg.ProxyWriteEnabled(), so.synth, so.rejLog))
+	mux.Handle("/v1/chat/completions", newOpenAIHandler())
+
+	startedAt := s.startedAt
+	version := s.version
+	mode := s.mode
+	synthAvail := so.synth != nil && so.synth.Available()
+	mongoStatusFn := so.mongoStatus
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		resp := map[string]any{
+			"status":     "ok",
+			"version":    version,
+			"mode":       mode,
+			"synthesis":  synthAvail,
+			"started_at": startedAt.UTC().Format(time.RFC3339),
+			"uptime_s":   int(time.Since(startedAt).Seconds()),
+		}
+		if mongoStatusFn != nil {
+			resp["mongodb"] = mongoStatusFn()
+		} else {
+			resp["mongodb"] = "connected"
+		}
+		json.NewEncoder(w).Encode(resp)
+	})
+
+	if so.store != nil {
+		registerDashboard(mux, so.store, so.sourceStore, so.quality, so.stewardStats)
+		registerAPI(mux, so.store, read, write, so.embedder, s.cfg, so.rejLog, so.synth)
+	}
+
+	if so.sourceStore != nil && so.ingester != nil {
+		registerSourceAPI(mux, so.sourceStore, so.store, so.ingester, so.quality)
+	}
+
+	var handler http.Handler = mux
+	if s.token != "" {
+		handler = authMiddleware(s.token, mux)
+	}
+	s.httpServer.Handler = handler
 }

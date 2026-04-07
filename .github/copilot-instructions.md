@@ -1,16 +1,6 @@
-# memoryd — Copilot Instructions
+# memoryd — Codebase Reference for Copilot
 
-> Persistent memory for coding agents. A local daemon that gives Claude Code (and other agents) long-term memory via transparent RAG.
-
-## What This Is
-
-memoryd is a Go daemon that sits between a coding agent and the Anthropic API. It intercepts every request, enriches it with relevant context from a MongoDB vector store, and stores useful information from responses — all transparently. The agent never knows it's there.
-
-```
-Developer → Claude Code → memoryd (127.0.0.1:7432) → Anthropic API
-                              ↕
-                        MongoDB (Atlas or Local)
-```
+> Shared memory/IP/project context is in the parent `.github/copilot-instructions.md` and `PROJECT_CONTEXT.md`. This file covers memoryd-specific architecture.
 
 Module: `github.com/memory-daemon/memoryd`
 Go version: 1.26+
@@ -18,7 +8,7 @@ Config: `~/.memoryd/config.yaml`
 
 ---
 
-## Architecture
+## Codebase Reference
 
 ### Package Map
 

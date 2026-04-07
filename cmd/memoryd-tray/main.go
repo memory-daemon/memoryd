@@ -16,7 +16,6 @@ import (
 	"fyne.io/systray"
 
 	"github.com/memory-daemon/memoryd/internal/config"
-	"github.com/memory-daemon/memoryd/internal/credential"
 )
 
 func main() {
@@ -28,11 +27,12 @@ var (
 	daemonDone chan struct{} // closed by the background goroutine when the process exits
 	daemonMu   sync.Mutex
 
-	// startGrace tracks the deadline until which the health poll should
-	// not flip the UI to "stopped". This prevents the 3-second poll from
-	// racing with daemon startup (which takes several seconds).
-	startGrace   time.Time
-	startGraceMu sync.Mutex
+	// uiGrace tracks the deadline until which the health poll should
+	// not override click-handler state. This prevents the 3-second poll
+	// from racing with daemon startup (takes several seconds) and from
+	// seeing a still-alive daemon after the user clicked Stop.
+	uiGrace   time.Time
+	uiGraceMu sync.Mutex
 )
 
 func onReady() {
@@ -45,6 +45,26 @@ func onReady() {
 	mMongo := systray.AddMenuItem("MongoDB: checking...", "MongoDB connection status")
 	mMongo.Disable()
 
+	mConnectMongo := systray.AddMenuItem("Connect to MongoDB...", "Configure MongoDB connection (local Docker or Atlas)")
+	mSetKey := systray.AddMenuItem("Set Anthropic Key...", "Store your Anthropic API key in the OS keychain")
+	mGrove := systray.AddMenuItem("Configure Grove Access...", "Set up Azure AI Inference via Grove (internal)")
+	mGrove.Disable()
+
+	// Show checkmarks if credentials are already configured.
+	if config.GetAnthropicAPIKey() != "" {
+		mSetKey.SetTitle("Set Anthropic Key  ✓")
+		mSetKey.Check()
+	}
+	if config.GetAzureAPIKey() != "" {
+		mGrove.SetTitle("Configure Grove Access  ✓")
+		mGrove.Check()
+	}
+
+	systray.AddSeparator()
+
+	mToggle := systray.AddMenuItem("Start", "Start or stop the daemon")
+	mDash := systray.AddMenuItem("Open Dashboard", "API keys, LLM synthesis, and pipeline settings")
+
 	systray.AddSeparator()
 
 	// --- Mode submenu ---
@@ -55,26 +75,17 @@ func onReady() {
 
 	systray.AddSeparator()
 
-	mToggle := systray.AddMenuItem("Start", "Start or stop the daemon")
-	mDash := systray.AddMenuItem("Open Dashboard", "Open web dashboard in browser")
-	mConnectMongo := systray.AddMenuItem("Connect to MongoDB...", "Configure MongoDB connection (local Docker or Atlas)")
-	mSetAPIKey := systray.AddMenuItem("Set Anthropic API Key...", "Store API key in OS Keychain for LLM synthesis")
-	mConfig := systray.AddMenuItem("Open config", "Open config file in editor")
-	mLogs := systray.AddMenuItem("Open logs directory", "Open ~/.memoryd in Finder")
-	mRegenToken := systray.AddMenuItem("Regenerate API token...", "Create a new dashboard token and restart the daemon")
-
-	// Show initial API key indicator.
-	if key, _ := credential.Get("anthropic_api_key"); key != "" {
-		mSetAPIKey.SetTitle("Set Anthropic API Key  ✓")
-	}
-
-	systray.AddSeparator()
-
 	mUninstall := systray.AddMenuItem("Uninstall memoryd...", "Remove memoryd and all its data")
 
 	systray.AddSeparator()
 
 	mQuit := systray.AddMenuItem("Quit", "Quit memoryd tray")
+
+	// Gate items behind MongoDB connection — disabled until connected.
+	mSetKey.Disable()
+	mToggle.Disable()
+	mDash.Disable()
+	mMode.Disable()
 
 	cfg, _ := config.Load()
 	port := cfg.Port
@@ -98,8 +109,8 @@ func onReady() {
 		for {
 			health := getHealth(port)
 			ok := health != nil
-			// During startup grace period, don't flip the UI to "stopped".
-			if !ok && inStartGrace() {
+			// During a grace period (start or stop), don't override click-handler state.
+			if inUIGrace() {
 				time.Sleep(3 * time.Second)
 				continue
 			}
@@ -112,7 +123,7 @@ func onReady() {
 				}
 			}
 
-			// Track MongoDB connection status.
+			// Track MongoDB connection status and gate menu items.
 			if ok {
 				mongoStr, _ := health["mongodb"].(string)
 				newMongoConnected := mongoStr == "connected"
@@ -120,10 +131,17 @@ func onReady() {
 					mongoConnected = newMongoConnected
 					if mongoConnected {
 						mMongo.SetTitle("MongoDB: ✅ connected")
+						mSetKey.Enable()
+						mToggle.Enable()
+						mDash.Enable()
+						mMode.Enable()
 					} else if mongoStr == "connecting" {
 						mMongo.SetTitle("MongoDB: 🔄 connecting...")
 					} else {
 						mMongo.SetTitle("MongoDB: ❌ disconnected — start MongoDB to continue")
+						mSetKey.Disable()
+						mDash.Disable()
+						mMode.Disable()
 					}
 				}
 			}
@@ -148,6 +166,10 @@ func onReady() {
 					mStatus.SetTitle("Status: ○ stopped")
 					mMongo.SetTitle("MongoDB: —")
 					mToggle.SetTitle("Start")
+					mToggle.Enable() // allow starting even when disconnected
+					mSetKey.Disable()
+					mDash.Disable()
+					mMode.Disable()
 					systray.SetTitle("M○")
 				}
 			}
@@ -168,12 +190,16 @@ func onReady() {
 
 		case <-mToggle.ClickedCh:
 			if running {
+				setStopGrace()
 				stopDaemon()
 				running = false
 				mongoConnected = false
 				mToggle.SetTitle("Start")
 				mStatus.SetTitle("Status: ○ stopped")
 				mMongo.SetTitle("MongoDB: —")
+				mSetKey.Disable()
+				mDash.Disable()
+				mMode.Disable()
 				systray.SetTitle("M○")
 			} else {
 				setStartGrace()
@@ -188,20 +214,26 @@ func onReady() {
 		case <-mConnectMongo.ClickedCh:
 			go connectMongoDialog(binaryPath, &running)
 
-		case <-mSetAPIKey.ClickedCh:
-			go setAPIKeyDialog(binaryPath, &running, mSetAPIKey)
+		case <-mSetKey.ClickedCh:
+			go func() {
+				setAnthropicKeyDialog(binaryPath, &running)
+				if config.GetAnthropicAPIKey() != "" {
+					mSetKey.SetTitle("Set Anthropic Key  ✓")
+					mSetKey.Check()
+				}
+			}()
+
+		case <-mGrove.ClickedCh:
+			go func() {
+				configureGroveDialog(binaryPath, &running)
+				if config.GetAzureAPIKey() != "" {
+					mGrove.SetTitle("Configure Grove Access  ✓")
+					mGrove.Check()
+				}
+			}()
 
 		case <-mDash.ClickedCh:
 			openDashboard(port)
-
-		case <-mConfig.ClickedCh:
-			exec.Command("open", "-t", config.Path()).Start()
-
-		case <-mLogs.ClickedCh:
-			exec.Command("open", config.Dir()).Start()
-
-		case <-mRegenToken.ClickedCh:
-			go regenTokenDialog(binaryPath, &running)
 
 		case <-mUninstall.ClickedCh:
 			go uninstallDialog(binaryPath)
@@ -243,21 +275,27 @@ func getHealth(port int) map[string]any {
 	return result
 }
 
-// setStartGrace sets a 15-second grace period during which the health poll
-// won't flip the UI to "stopped". This covers the time the daemon needs to
-// connect to MongoDB, load the embedding model, and start the HTTP server.
-func setStartGrace() {
-	startGraceMu.Lock()
-	startGrace = time.Now().Add(15 * time.Second)
-	startGraceMu.Unlock()
+// setUIGrace sets a grace period during which the health poll won't override
+// the state set by the click handler. The start case needs 15 s (daemon boot),
+// the stop case only needs a few seconds for the process to exit.
+func setUIGrace(d time.Duration) {
+	uiGraceMu.Lock()
+	uiGrace = time.Now().Add(d)
+	uiGraceMu.Unlock()
 }
 
-// inStartGrace returns true if we're within the startup grace period.
-func inStartGrace() bool {
-	startGraceMu.Lock()
-	defer startGraceMu.Unlock()
-	return time.Now().Before(startGrace)
+func setStartGrace() { setUIGrace(15 * time.Second) }
+func setStopGrace()  { setUIGrace(5 * time.Second) }
+
+// inUIGrace returns true if we're within a UI grace period.
+func inUIGrace() bool {
+	uiGraceMu.Lock()
+	defer uiGraceMu.Unlock()
+	return time.Now().Before(uiGrace)
 }
+
+// Keep old names around for the test file.
+func inStartGrace() bool { return inUIGrace() }
 
 func startDaemon(binary string) {
 	daemonMu.Lock()
@@ -514,6 +552,96 @@ func finishMongoSetup(uri, binaryPath string, running *bool) {
 		`display notification "MongoDB connected — memoryd is starting" with title "memoryd"`).Run()
 }
 
+// setAnthropicKeyDialog prompts the user for their Anthropic API key and
+// stores it in the OS keychain, then restarts the daemon to pick it up.
+func setAnthropicKeyDialog(binaryPath string, running *bool) {
+	keyOut, err := exec.Command("osascript",
+		"-e", `display dialog "Enter your Anthropic API key:" default answer "" with hidden answer buttons {"Cancel", "Save"} default button "Save" with title "memoryd – Anthropic Key"`,
+		"-e", `text returned of result`,
+	).Output()
+	if err != nil {
+		return // cancelled
+	}
+	key := strings.TrimSpace(string(keyOut))
+	if key == "" {
+		return
+	}
+	if err := config.StoreCredential("anthropic_api_key", key); err != nil {
+		exec.Command("osascript", "-e",
+			fmt.Sprintf(`display dialog "Failed to save API key: %s" buttons {"OK"} with icon stop with title "memoryd"`, err.Error())).Run()
+		return
+	}
+
+	// Restart daemon to pick up the new key.
+	if *running {
+		stopDaemon()
+		time.Sleep(500 * time.Millisecond)
+		setStartGrace()
+		startDaemon(binaryPath)
+	}
+
+	exec.Command("osascript", "-e",
+		`display notification "Anthropic API key saved" with title "memoryd"`).Run()
+}
+
+// configureGroveDialog prompts for a Grove (Azure AI Inference) API key and
+// endpoint, stores them, and restarts the daemon so the Azure synthesizer
+// backend picks them up.
+func configureGroveDialog(binaryPath string, running *bool) {
+	endpointOut, err := exec.Command("osascript",
+		"-e", `display dialog "Enter your Grove endpoint:" default answer "https://" buttons {"Cancel", "Next"} default button "Next" with title "memoryd – Grove"`,
+		"-e", `text returned of result`,
+	).Output()
+	if err != nil {
+		return // cancelled
+	}
+	endpoint := strings.TrimSpace(string(endpointOut))
+	if endpoint == "" || endpoint == "https://" {
+		return
+	}
+
+	keyOut, err := exec.Command("osascript",
+		"-e", `display dialog "Enter your Grove API key:" default answer "" with hidden answer buttons {"Cancel", "Save"} default button "Save" with title "memoryd – Grove"`,
+		"-e", `text returned of result`,
+	).Output()
+	if err != nil {
+		return // cancelled
+	}
+	key := strings.TrimSpace(string(keyOut))
+	if key == "" {
+		return
+	}
+
+	// Store API key in keychain.
+	if err := config.StoreCredential("azure_openai_api_key", key); err != nil {
+		exec.Command("osascript", "-e",
+			fmt.Sprintf(`display dialog "Failed to save API key: %s" buttons {"OK"} with icon stop with title "memoryd"`, err.Error())).Run()
+		return
+	}
+
+	// Save Azure config with endpoint and Haiku deployment.
+	if err := config.SaveAzureConfig(config.AzureConfig{
+		Endpoint:   endpoint,
+		Deployment: "claude-haiku-4-5-20251001",
+		APIVersion: "2024-12-01-preview",
+	}); err != nil {
+		exec.Command("osascript", "-e",
+			fmt.Sprintf(`display dialog "Failed to save config: %s" buttons {"OK"} with icon stop with title "memoryd"`, err.Error())).Run()
+		return
+	}
+
+	// Restart daemon to pick up the new Azure config.
+	if *running {
+		stopDaemon()
+		time.Sleep(500 * time.Millisecond)
+		setStartGrace()
+		startDaemon(binaryPath)
+	}
+
+	exec.Command("osascript", "-e",
+		`display notification "Grove access configured — using Azure AI Inference" with title "memoryd"`).Run()
+}
+
 // setModeChecks updates submenu check marks to reflect the active mode.
 func setModeChecks(mode string, proxy, mcp, mcpRO *systray.MenuItem) {
 	proxy.Uncheck()
@@ -555,110 +683,6 @@ func switchMode(mode string, proxy, mcp, mcpRO *systray.MenuItem, binaryPath str
 	}[mode]
 	exec.Command("osascript", "-e",
 		fmt.Sprintf(`display notification "Mode set to: %s" with title "memoryd"`, label)).Run()
-}
-
-// regenTokenDialog confirms, deletes the token file, and restarts the daemon.
-func regenTokenDialog(binaryPath string, running *bool) {
-	_, err := exec.Command("osascript",
-		"-e", `display dialog "This will generate a new API token and restart the daemon.\n\nAny browser sessions will need to be re-opened from the tray." buttons {"Cancel", "Regenerate"} default button "Cancel" with title "memoryd – Regenerate Token"`,
-		"-e", `button returned of result`).Output()
-	if err != nil {
-		return // cancelled
-	}
-
-	if err := os.Remove(config.TokenPath()); err != nil && !os.IsNotExist(err) {
-		exec.Command("osascript", "-e",
-			fmt.Sprintf(`display dialog "Could not remove token file: %s" buttons {"OK"} with icon stop with title "memoryd"`, err.Error())).Run()
-		return
-	}
-
-	stopDaemon()
-	time.Sleep(500 * time.Millisecond)
-	setStartGrace()
-	startDaemon(binaryPath)
-	*running = true
-
-	exec.Command("osascript", "-e",
-		`display notification "New token generated — use Open Dashboard to access the UI" with title "memoryd"`).Run()
-}
-
-// setAPIKeyDialog prompts for the Anthropic API key, stores it in the OS
-// Keychain, and restarts the daemon so it picks up the new key.
-func setAPIKeyDialog(binaryPath string, running *bool, menuItem *systray.MenuItem) {
-	// Check if a key is already set to offer a Remove option.
-	existing, _ := credential.Get("anthropic_api_key")
-
-	var buttons string
-	var msg string
-	if existing != "" {
-		buttons = `buttons {"Cancel", "Remove", "Save"} default button "Save"`
-		msg = fmt.Sprintf("Current key: %s\\n\\nPaste a new key to replace it, or click Remove.", maskKey(existing))
-	} else {
-		buttons = `buttons {"Cancel", "Save"} default button "Save"`
-		msg = "Paste your Anthropic API key (sk-ant-...).\\n\\nStored securely in the macOS Keychain."
-	}
-
-	// Use two separate osascript calls: one for the dialog, then extract
-	// text and button separately to avoid comma-in-key parsing issues.
-	script := fmt.Sprintf(`set dr to display dialog "%s" default answer "" %s with hidden answer with title "memoryd – Anthropic API Key"
-set btn to button returned of dr
-set val to text returned of dr
-return val & "\n" & btn`, msg, buttons)
-
-	out, err := exec.Command("osascript", "-e", script).Output()
-	if err != nil {
-		return // cancelled
-	}
-
-	// Split on newline — value is everything before the last line, button is the last line.
-	raw := strings.TrimSpace(string(out))
-	idx := strings.LastIndex(raw, "\n")
-	if idx < 0 {
-		return
-	}
-	value := raw[:idx]
-	button := strings.TrimSpace(raw[idx+1:])
-
-	switch button {
-	case "Remove":
-		_ = credential.Delete("anthropic_api_key")
-		menuItem.SetTitle("Set Anthropic API Key...")
-		exec.Command("osascript", "-e",
-			`display notification "API key removed from Keychain" with title "memoryd"`).Run()
-	case "Save":
-		if value == "" {
-			return // nothing entered
-		}
-		if err := credential.Set("anthropic_api_key", value); err != nil {
-			exec.Command("osascript", "-e",
-				fmt.Sprintf(`display dialog "Failed to save API key: %s" buttons {"OK"} with icon stop with title "memoryd"`, err.Error())).Run()
-			return
-		}
-		menuItem.SetTitle("Set Anthropic API Key  ✓")
-		exec.Command("osascript", "-e",
-			`display notification "API key saved to Keychain" with title "memoryd"`).Run()
-	default:
-		return
-	}
-
-	// Restart daemon to pick up the change.
-	if *running {
-		stopDaemon()
-		time.Sleep(500 * time.Millisecond)
-		setStartGrace()
-		startDaemon(binaryPath)
-	}
-}
-
-// maskKey returns a masked version of an API key for display, or empty string.
-func maskKey(key string) string {
-	if key == "" {
-		return ""
-	}
-	if len(key) <= 12 {
-		return "••••••••"
-	}
-	return key[:7] + "••••" + key[len(key)-4:]
 }
 
 // uninstallDialog confirms with the user and removes memoryd components.

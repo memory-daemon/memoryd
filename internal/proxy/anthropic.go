@@ -182,32 +182,29 @@ func (h *anthropicHandler) ingest(rawReq map[string]json.RawMessage, assistantTe
 	ctx := context.Background()
 	userMsg := extractLastUserMessage(rawReq)
 
-	if h.synth.Available() {
-		pCfg := h.write.Config()
+	pCfg := h.write.Config()
 
-		// --- Pre-Haiku gates (ordered cheapest → most expensive) ---
+	// --- Pre-Haiku gates (ordered cheapest → most expensive) ---
+	// These run regardless of whether the synthesizer is available.
 
-		// 1. String-match pre-filter (ack + procedural prefix).
-		if userMsg != "" && rejection.QuickFilter(userMsg, assistantText) {
-			h.rejLog.Add(rejection.StagePreFilter, userMsg, assistantText)
-			log.Printf("[proxy] pre-filter: skipped procedural exchange (user=%d asst=%d chars)", len(userMsg), len(assistantText))
-		} else if pCfg.IngestMinLen > 0 && len(strings.TrimSpace(assistantText)) < pCfg.IngestMinLen {
-			// 2. Length gate — too short for durable knowledge.
-			h.rejLog.Add(rejection.StagePreFilter, userMsg, assistantText)
-			log.Printf("[proxy] length-filter: skipped short response (%d chars < %d)", len(assistantText), pCfg.IngestMinLen)
-		} else if pCfg.ContentScorePreGate > 0 {
-			// 3. Content score pre-gate — embed raw text, score against noise prototypes.
-			//    Do NOT add to rejection store — scorer learns only from Haiku SKIP verdicts.
-			if score, ok := h.write.PreScore(ctx, assistantText); ok && score < pCfg.ContentScorePreGate {
-				log.Printf("[proxy] content-score-filter: skipped noise (score=%.2f < gate=%.2f)", score, pCfg.ContentScorePreGate)
-			} else {
-				h.synthesizeAndStore(ctx, userMsg, assistantText)
-			}
+	// 1. String-match pre-filter (ack + procedural prefix).
+	if userMsg != "" && rejection.QuickFilter(userMsg, assistantText) {
+		h.rejLog.Add(rejection.StagePreFilter, userMsg, assistantText)
+		log.Printf("[proxy] pre-filter: skipped procedural exchange (user=%d asst=%d chars)", len(userMsg), len(assistantText))
+	} else if pCfg.IngestMinLen > 0 && len(strings.TrimSpace(assistantText)) < pCfg.IngestMinLen {
+		// 2. Length gate — too short for durable knowledge.
+		h.rejLog.Add(rejection.StagePreFilter, userMsg, assistantText)
+		log.Printf("[proxy] length-filter: skipped short response (%d chars < %d)", len(assistantText), pCfg.IngestMinLen)
+	} else if pCfg.ContentScorePreGate > 0 {
+		// 3. Content score pre-gate — embed raw text, score against noise prototypes.
+		//    Do NOT add to rejection store — scorer learns only from Haiku SKIP verdicts.
+		if score, ok := h.write.PreScore(ctx, assistantText); ok && score < pCfg.ContentScorePreGate {
+			log.Printf("[proxy] content-score-filter: skipped noise (score=%.2f < gate=%.2f)", score, pCfg.ContentScorePreGate)
 		} else {
-			h.synthesizeAndStore(ctx, userMsg, assistantText)
+			h.storeExchange(ctx, userMsg, assistantText)
 		}
 	} else {
-		log.Printf("[proxy] synthesizer unavailable — skipping write (quality gate requires LLM)")
+		h.storeExchange(ctx, userMsg, assistantText)
 	}
 
 	// Session synthesis: distill every sessionSynthesisInterval new pairs.
@@ -249,6 +246,31 @@ func (h *anthropicHandler) synthesizeAndStore(ctx context.Context, userMsg, assi
 		}
 		h.write.ProcessDirect(entry, "claude-code", nil)
 		log.Printf("[proxy] SynthesizeQA: stored entry (%d chars)", len(entry))
+	}()
+}
+
+// storeExchange routes to Haiku synthesis when available, otherwise stores raw.
+func (h *anthropicHandler) storeExchange(ctx context.Context, userMsg, assistantText string) {
+	if h.synth.Available() {
+		h.synthesizeAndStore(ctx, userMsg, assistantText)
+	} else {
+		h.storeRaw(userMsg, assistantText)
+	}
+}
+
+// storeRaw stores a Q&A exchange without LLM synthesis. Used as a fallback
+// when no Anthropic API key is available.
+func (h *anthropicHandler) storeRaw(userMsg, assistantText string) {
+	go func() {
+		var text string
+		if userMsg != "" {
+			text = fmt.Sprintf("Q: %s\n\nA: %s", userMsg, assistantText)
+		} else {
+			text = assistantText
+		}
+		result := h.write.ProcessFiltered(text, "claude-code", nil)
+		log.Printf("[proxy] stored raw exchange without synthesis (%d chars, stored=%d, dup=%d, filtered=%d)",
+			len(text), result.Stored, result.Duplicates, result.Filtered)
 	}()
 }
 
