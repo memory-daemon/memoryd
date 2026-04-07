@@ -28,8 +28,11 @@ func NewMongoStore(ctx context.Context, uri, database string) (*MongoStore, erro
 	const maxRetries = 5
 
 	opts := options.Client().ApplyURI(uri).
-		SetServerSelectionTimeout(5 * time.Second).
-		SetConnectTimeout(5 * time.Second)
+		SetServerSelectionTimeout(10 * time.Second).
+		SetConnectTimeout(10 * time.Second).
+		SetMaxConnIdleTime(30 * time.Second).
+		SetMaxPoolSize(50).
+		SetMinPoolSize(2)
 
 	client, err := mongo.Connect(ctx, opts)
 	if err != nil {
@@ -183,6 +186,11 @@ func (s *MongoStore) ListBySource(ctx context.Context, sourcePrefix string, limi
 
 func (s *MongoStore) Close() error {
 	return s.client.Disconnect(context.Background())
+}
+
+// Ping checks connectivity to MongoDB.
+func (s *MongoStore) Ping(ctx context.Context) error {
+	return s.client.Ping(ctx, nil)
 }
 
 // --- Steward support ---

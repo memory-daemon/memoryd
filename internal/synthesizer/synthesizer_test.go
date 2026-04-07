@@ -566,9 +566,11 @@ func TestAzure_SynthesizeQA(t *testing.T) {
 	const synthesized = "The proxy server binds to 127.0.0.1:7432."
 	var capturedPath string
 	var capturedAPIKey string
+	var capturedBody map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedPath = r.URL.Path + "?" + r.URL.RawQuery
+		capturedPath = r.URL.Path
 		capturedAPIKey = r.Header.Get("api-key")
+		json.NewDecoder(r.Body).Decode(&capturedBody)
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(mockAzureResponse(synthesized))
 	}))
@@ -587,11 +589,14 @@ func TestAzure_SynthesizeQA(t *testing.T) {
 	if result != synthesized {
 		t.Errorf("unexpected result: %q", result)
 	}
-	if capturedPath != "/openai/deployments/gpt-4o-mini/chat/completions?api-version=2024-06-01" {
+	if capturedPath != "/openai/v1/chat/completions" {
 		t.Errorf("unexpected request path: %s", capturedPath)
 	}
 	if capturedAPIKey != "test-key-123" {
 		t.Errorf("unexpected api-key header: %s", capturedAPIKey)
+	}
+	if model, _ := capturedBody["model"].(string); model != "gpt-4o-mini" {
+		t.Errorf("expected model in request body, got: %q", model)
 	}
 }
 

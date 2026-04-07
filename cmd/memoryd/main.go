@@ -324,11 +324,50 @@ func startCmd() *cobra.Command {
 				return nil
 			}
 
+			// startMongoMonitor periodically pings MongoDB and updates
+			// the cached status so the health endpoint reflects reality.
+			startMongoMonitor := func(ctx context.Context) {
+				go func() {
+					ticker := time.NewTicker(15 * time.Second)
+					defer ticker.Stop()
+					for {
+						select {
+						case <-ctx.Done():
+							return
+						case <-ticker.C:
+						}
+						wiredMu.Lock()
+						m := multi
+						wiredMu.Unlock()
+						if m == nil {
+							continue
+						}
+						pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+						err := m.Primary().Mongo.Ping(pingCtx)
+						cancel()
+						if err != nil {
+							prev := mongoStatus.Load().(string)
+							if prev == "connected" {
+								log.Printf("[mongo-monitor] connection lost: %v", err)
+							}
+							mongoStatus.Store("disconnected")
+						} else {
+							prev := mongoStatus.Load().(string)
+							if prev != "connected" {
+								log.Println("[mongo-monitor] connection restored")
+							}
+							mongoStatus.Store("connected")
+						}
+					}
+				}()
+			}
+
 			// Wire up the pipeline if MongoDB connected on first try.
 			if connErr == nil {
 				if err := wirePipeline(entries); err != nil {
 					return err
 				}
+				startMongoMonitor(ctx)
 			}
 
 			// Build server options — may be nil if MongoDB isn't connected yet.
@@ -408,6 +447,7 @@ func startCmd() *cobra.Command {
 						wiredMu.Unlock()
 
 						log.Println("Full pipeline active — memoryd is fully operational")
+						startMongoMonitor(ctx)
 						return
 					}
 				}()

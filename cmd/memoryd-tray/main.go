@@ -48,7 +48,6 @@ func onReady() {
 	mConnectMongo := systray.AddMenuItem("Connect to MongoDB...", "Configure MongoDB connection (local Docker or Atlas)")
 	mSetKey := systray.AddMenuItem("Set Anthropic Key...", "Store your Anthropic API key in the OS keychain")
 	mGrove := systray.AddMenuItem("Configure Grove Access...", "Set up Azure AI Inference via Grove (internal)")
-	mGrove.Disable()
 
 	// Show checkmarks if credentials are already configured.
 	if config.GetAnthropicAPIKey() != "" {
@@ -589,7 +588,7 @@ func setAnthropicKeyDialog(binaryPath string, running *bool) {
 // backend picks them up.
 func configureGroveDialog(binaryPath string, running *bool) {
 	endpointOut, err := exec.Command("osascript",
-		"-e", `display dialog "Enter your Grove endpoint:" default answer "https://" buttons {"Cancel", "Next"} default button "Next" with title "memoryd – Grove"`,
+		"-e", `display dialog "Enter your Grove base URL (without /openai/v1/...):" default answer "https://grove-gateway-prod.azure-api.net/grove-foundry-prod" buttons {"Cancel", "Next"} default button "Next" with title "memoryd – Grove"`,
 		"-e", `text returned of result`,
 	).Output()
 	if err != nil {
@@ -598,6 +597,12 @@ func configureGroveDialog(binaryPath string, running *bool) {
 	endpoint := strings.TrimSpace(string(endpointOut))
 	if endpoint == "" || endpoint == "https://" {
 		return
+	}
+
+	// Strip the API path if the user pasted the full URL from a curl example.
+	endpoint = strings.TrimRight(endpoint, "/")
+	for _, suffix := range []string{"/openai/v1/chat/completions", "/chat/completions"} {
+		endpoint = strings.TrimSuffix(endpoint, suffix)
 	}
 
 	keyOut, err := exec.Command("osascript",
@@ -619,11 +624,10 @@ func configureGroveDialog(binaryPath string, running *bool) {
 		return
 	}
 
-	// Save Azure config with endpoint and Haiku deployment.
+	// Save Azure config with endpoint and model.
 	if err := config.SaveAzureConfig(config.AzureConfig{
 		Endpoint:   endpoint,
-		Deployment: "claude-haiku-4-5-20251001",
-		APIVersion: "2024-12-01-preview",
+		Deployment: "gpt-5.4",
 	}); err != nil {
 		exec.Command("osascript", "-e",
 			fmt.Sprintf(`display dialog "Failed to save config: %s" buttons {"OK"} with icon stop with title "memoryd"`, err.Error())).Run()
