@@ -387,7 +387,7 @@ func TestCleanMCPConfig_MissingFile(t *testing.T) {
 
 func TestCleanMCPConfig_InvalidJSON(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "bad.json")
-	os.WriteFile(p, []byte("{{bad"), 0600)
+	_ = os.WriteFile(p, []byte("{{bad"), 0600)
 	if cleanMCPConfig(p) {
 		t.Error("expected false")
 	}
@@ -396,7 +396,7 @@ func TestCleanMCPConfig_InvalidJSON(t *testing.T) {
 func TestCleanMCPConfig_NoServersKey(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.json")
 	data, _ := json.Marshal(map[string]any{"other": 1})
-	os.WriteFile(p, data, 0600)
+	_ = os.WriteFile(p, data, 0600)
 	if cleanMCPConfig(p) {
 		t.Error("expected false")
 	}
@@ -405,7 +405,7 @@ func TestCleanMCPConfig_NoServersKey(t *testing.T) {
 func TestCleanMCPConfig_ServersNotObject(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "c.json")
 	data, _ := json.Marshal(map[string]any{"mcpServers": "string"})
-	os.WriteFile(p, data, 0600)
+	_ = os.WriteFile(p, data, 0600)
 	if cleanMCPConfig(p) {
 		t.Error("expected false")
 	}
