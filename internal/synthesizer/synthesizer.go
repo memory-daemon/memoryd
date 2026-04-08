@@ -210,9 +210,10 @@ func (az *azureBackend) available() bool {
 	return az.apiKey != "" && az.endpoint != "" && az.deployment != ""
 }
 
-func (az *azureBackend) complete(ctx context.Context, _ string, maxTokens int, prompt string) (string, error) {
+func (az *azureBackend) complete(ctx context.Context, model string, maxTokens int, prompt string) (string, error) {
 	reqBody, err := json.Marshal(map[string]any{
-		"max_tokens": maxTokens,
+		"model":                model,
+		"max_completion_tokens": maxTokens,
 		"messages": []map[string]any{
 			{"role": "user", "content": prompt},
 		},
@@ -221,8 +222,7 @@ func (az *azureBackend) complete(ctx context.Context, _ string, maxTokens int, p
 		return "", fmt.Errorf("synthesizer: marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/openai/deployments/%s/chat/completions?api-version=%s",
-		az.endpoint, az.deployment, az.apiVersion)
+	url := az.endpoint + "/openai/v1/chat/completions"
 
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqBody))
 	if err != nil {
