@@ -36,6 +36,7 @@ type anthropicHandler struct {
 	writeEnabled bool // false in mcp or mcp-readonly modes
 	synth        *synthesizer.Synthesizer
 	rejLog       *rejection.Store
+	xbuf         *exchangeBuffer
 }
 
 func newAnthropicHandler(upstreamURL string, write *pipeline.WritePipeline, client *http.Client, writeEnabled bool, synth *synthesizer.Synthesizer, rejLog *rejection.Store) *anthropicHandler {
@@ -46,6 +47,7 @@ func newAnthropicHandler(upstreamURL string, write *pipeline.WritePipeline, clie
 		writeEnabled: writeEnabled,
 		synth:        synth,
 		rejLog:       rejLog,
+		xbuf:         newExchangeBuffer(0),
 	}
 }
 
@@ -182,30 +184,7 @@ func (h *anthropicHandler) ingest(rawReq map[string]json.RawMessage, assistantTe
 	ctx := context.Background()
 	userMsg := extractLastUserMessage(rawReq)
 
-	pCfg := h.write.Config()
-
-	// --- Pre-Haiku gates (ordered cheapest → most expensive) ---
-	// These run regardless of whether the synthesizer is available.
-
-	// 1. String-match pre-filter (ack + procedural prefix).
-	if userMsg != "" && rejection.QuickFilter(userMsg, assistantText) {
-		h.rejLog.Add(rejection.StagePreFilter, userMsg, assistantText)
-		log.Printf("[proxy] pre-filter: skipped procedural exchange (user=%d asst=%d chars)", len(userMsg), len(assistantText))
-	} else if pCfg.IngestMinLen > 0 && len(strings.TrimSpace(assistantText)) < pCfg.IngestMinLen {
-		// 2. Length gate — too short for durable knowledge.
-		h.rejLog.Add(rejection.StagePreFilter, userMsg, assistantText)
-		log.Printf("[proxy] length-filter: skipped short response (%d chars < %d)", len(assistantText), pCfg.IngestMinLen)
-	} else if pCfg.ContentScorePreGate > 0 {
-		// 3. Content score pre-gate — embed raw text, score against noise prototypes.
-		//    Do NOT add to rejection store — scorer learns only from Haiku SKIP verdicts.
-		if score, ok := h.write.PreScore(ctx, assistantText); ok && score < pCfg.ContentScorePreGate {
-			log.Printf("[proxy] content-score-filter: skipped noise (score=%.2f < gate=%.2f)", score, pCfg.ContentScorePreGate)
-		} else {
-			h.storeExchange(ctx, userMsg, assistantText)
-		}
-	} else {
-		h.storeExchange(ctx, userMsg, assistantText)
-	}
+	h.gateAndBuffer(ctx, userMsg, assistantText)
 
 	// Session synthesis: distill every sessionSynthesisInterval new pairs.
 	// Fires at minSessionTurns, then every sessionSynthesisInterval pairs after,
@@ -231,10 +210,59 @@ func (h *anthropicHandler) ingest(rawReq map[string]json.RawMessage, assistantTe
 	}
 }
 
+// gateAndBuffer runs the pre-synthesis quality gates in cheapest-first order,
+// embeds the exchange (once) for both content-score gating and the exchange
+// buffer, and either stores the exchange or buffers it as rejected context.
+func (h *anthropicHandler) gateAndBuffer(ctx context.Context, userMsg, assistantText string) {
+	pCfg := h.write.Config()
+
+	// Gate 1: String-match pre-filter (cheapest — no embedding needed).
+	// Catches pure acks ("I'll do that") that carry no topical signal.
+	if userMsg != "" && rejection.QuickFilter(userMsg, assistantText) {
+		h.rejLog.Add(rejection.StagePreFilter, userMsg, assistantText)
+		log.Printf("[proxy] pre-filter: skipped procedural exchange (user=%d asst=%d chars)", len(userMsg), len(assistantText))
+		return
+	}
+
+	// Gate 2: Length gate — too short for durable knowledge.
+	// Still buffer (without embedding) — short exchanges carry topic signal.
+	if pCfg.IngestMinLen > 0 && len(strings.TrimSpace(assistantText)) < pCfg.IngestMinLen {
+		h.rejLog.Add(rejection.StagePreFilter, userMsg, assistantText)
+		h.xbuf.Add(userMsg, assistantText, nil, false)
+		log.Printf("[proxy] length-filter: skipped short response (%d chars < %d)", len(assistantText), pCfg.IngestMinLen)
+		return
+	}
+
+	// Embed once — used for content-score gate and exchange buffer.
+	// When no embedder is available, vec is nil and we skip similarity-based
+	// features but the pipeline still functions.
+	vec, _ := h.write.EmbedText(ctx, assistantText)
+
+	// Gate 3: Content score pre-gate — score against noise prototypes.
+	//    Do NOT add to rejection store — scorer learns only from Haiku SKIP verdicts.
+	if pCfg.ContentScorePreGate > 0 && vec != nil {
+		if score, ok := h.write.ScoreVec(vec); ok && score < pCfg.ContentScorePreGate {
+			h.xbuf.Add(userMsg, assistantText, vec, false)
+			log.Printf("[proxy] content-score-filter: skipped noise (score=%.2f < gate=%.2f)", score, pCfg.ContentScorePreGate)
+			return
+		}
+	}
+
+	// Passed all gates — buffer as accepted and store.
+	h.xbuf.Add(userMsg, assistantText, vec, true)
+	h.storeExchange(ctx, userMsg, assistantText, vec)
+}
+
 // synthesizeAndStore runs the Haiku quality gate in a goroutine and stores the result.
-func (h *anthropicHandler) synthesizeAndStore(ctx context.Context, userMsg, assistantText string) {
+// vec is the pre-computed embedding of assistantText (may be nil).
+func (h *anthropicHandler) synthesizeAndStore(ctx context.Context, userMsg, assistantText string, vec []float32) {
+	// Build topical context from recently-rejected exchanges that are
+	// semantically similar to this one (reuses the same cosine-similarity
+	// threshold as the write pipeline's topic grouping).
+	topicCtx := h.xbuf.TopicalContext(vec, pipeline.TopicBoundaryThreshold)
+
 	go func() {
-		entry, err := h.synth.SynthesizeQA(ctx, userMsg, assistantText)
+		entry, err := h.synth.SynthesizeQA(ctx, userMsg, assistantText, topicCtx)
 		if err != nil {
 			log.Printf("[proxy] SynthesizeQA error: %v — skipping (quality gate)", err)
 			return
@@ -250,9 +278,10 @@ func (h *anthropicHandler) synthesizeAndStore(ctx context.Context, userMsg, assi
 }
 
 // storeExchange routes to Haiku synthesis when available, otherwise stores raw.
-func (h *anthropicHandler) storeExchange(ctx context.Context, userMsg, assistantText string) {
+// vec is the pre-computed embedding of assistantText (may be nil).
+func (h *anthropicHandler) storeExchange(ctx context.Context, userMsg, assistantText string, vec []float32) {
 	if h.synth.Available() {
-		h.synthesizeAndStore(ctx, userMsg, assistantText)
+		h.synthesizeAndStore(ctx, userMsg, assistantText, vec)
 	} else {
 		h.storeRaw(userMsg, assistantText)
 	}

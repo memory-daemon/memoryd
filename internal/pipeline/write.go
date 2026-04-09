@@ -138,21 +138,43 @@ func (wp *WritePipeline) UpdateScorer(scorer *quality.ContentScorer) {
 	wp.scorer = scorer
 }
 
+// EmbedText embeds the given text and returns the vector.
+// Returns (nil, err) when the embedder is unavailable or fails.
+func (wp *WritePipeline) EmbedText(ctx context.Context, text string) ([]float32, error) {
+	if wp.embedder == nil {
+		return nil, fmt.Errorf("embedder not available")
+	}
+	return wp.embedder.Embed(ctx, text)
+}
+
+// ScoreVec scores a pre-computed embedding against the content scorer's noise
+// prototypes. Returns (score, true) on success or (0, false) when the scorer
+// is unavailable.
+func (wp *WritePipeline) ScoreVec(vec []float32) (float64, bool) {
+	wp.mu.RLock()
+	scorer := wp.scorer
+	wp.mu.RUnlock()
+	if scorer == nil {
+		return 0, false
+	}
+	return scorer.Score(vec), true
+}
+
 // PreScore embeds the given text and returns its content quality score.
 // Returns (score, true) on success or (0, false) when the scorer is
 // unavailable or embedding fails. This is designed for pre-Haiku gating:
 // callers can skip the expensive LLM call when the raw text scores below
 // the noise threshold.
 func (wp *WritePipeline) PreScore(ctx context.Context, text string) (float64, bool) {
+	// Check scorer availability first to avoid a needless embed call.
 	wp.mu.RLock()
 	scorer := wp.scorer
 	wp.mu.RUnlock()
-
 	if scorer == nil {
 		return 0, false
 	}
 
-	vec, err := wp.embedder.Embed(ctx, text)
+	vec, err := wp.EmbedText(ctx, text)
 	if err != nil {
 		return 0, false
 	}
@@ -393,7 +415,7 @@ func detectTopicGroups(chunks []string, vecs [][]float32, threshold float64, max
 
 	for i := 1; i < len(chunks); i++ {
 		nextLen := len(joinSeparator) + len(chunks[i])
-		sim := cosineSim(vecs[i-1], vecs[i])
+		sim := CosineSim(vecs[i-1], vecs[i])
 
 		// Split on topic boundary OR when adding the next chunk would
 		// exceed the embedding model's context window.
@@ -417,8 +439,8 @@ func detectTopicGroups(chunks []string, vecs [][]float32, threshold float64, max
 	return groups
 }
 
-// cosineSim computes cosine similarity between two vectors.
-func cosineSim(a, b []float32) float64 {
+// CosineSim computes cosine similarity between two vectors.
+func CosineSim(a, b []float32) float64 {
 	if len(a) != len(b) || len(a) == 0 {
 		return 0
 	}

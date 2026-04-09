@@ -239,7 +239,7 @@ func TestOptions(t *testing.T) {
 
 func TestSynthesizeQA_Unavailable_ReturnsEmpty(t *testing.T) {
 	s := New("", "http://unused")
-	result, err := s.SynthesizeQA(context.Background(), "question?", "answer.")
+	result, err := s.SynthesizeQA(context.Background(), "question?", "answer.", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestSynthesizeQA_Unavailable_ReturnsEmpty(t *testing.T) {
 
 func TestSynthesizeQA_NilSynthesizer(t *testing.T) {
 	var s *Synthesizer
-	result, err := s.SynthesizeQA(context.Background(), "q", "a")
+	result, err := s.SynthesizeQA(context.Background(), "q", "a", "")
 	if err != nil {
 		t.Fatalf("nil Synthesizer.SynthesizeQA() should not error: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestSynthesizeQA_SKIP_ReturnsEmpty(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	result, err := s.SynthesizeQA(context.Background(), "Let me check that file", "OK, looking at it now.")
+	result, err := s.SynthesizeQA(context.Background(), "Let me check that file", "OK, looking at it now.", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestSynthesizeQA_SKIP_WithWhitespace(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	result, err := s.SynthesizeQA(context.Background(), "q", "a")
+	result, err := s.SynthesizeQA(context.Background(), "q", "a", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestSynthesizeQA_SKIP_WithExplanation(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	result, err := s.SynthesizeQA(context.Background(), "q", "I looked at the code and it seems fine.")
+	result, err := s.SynthesizeQA(context.Background(), "q", "I looked at the code and it seems fine.", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -319,7 +319,7 @@ func TestSynthesizeQA_SKIP_WithSpaceExplanation(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	result, err := s.SynthesizeQA(context.Background(), "q", "a")
+	result, err := s.SynthesizeQA(context.Background(), "q", "a", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestSynthesizeQA_StagePreamble_ReturnsEmpty(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	result, err := s.SynthesizeQA(context.Background(), "q", "Let me look at the files...")
+	result, err := s.SynthesizeQA(context.Background(), "q", "Let me look at the files...", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestSynthesizeQA_ReturnsContent(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	result, err := s.SynthesizeQA(context.Background(), "How does the proxy work?", "The proxy binds to 127.0.0.1:7432...")
+	result, err := s.SynthesizeQA(context.Background(), "How does the proxy work?", "The proxy binds to 127.0.0.1:7432...", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -378,7 +378,7 @@ func TestSynthesizeQA_PromptContainsUserAndAssistant(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	_, _ = s.SynthesizeQA(context.Background(), "Why does config use port 7432?", "Because that port is unlikely to conflict.")
+	_, _ = s.SynthesizeQA(context.Background(), "Why does config use port 7432?", "Because that port is unlikely to conflict.", "")
 
 	if !strings.Contains(capturedPrompt, "USER: Why does config use port 7432?") {
 		t.Error("prompt should contain USER: prefix with the question")
@@ -402,7 +402,7 @@ func TestSynthesizeQA_EmptyQuestion_UsesAssistantOutputFrame(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	_, _ = s.SynthesizeQA(context.Background(), "", "The embedder uses voyage-4-nano at 1024 dimensions.")
+	_, _ = s.SynthesizeQA(context.Background(), "", "The embedder uses voyage-4-nano at 1024 dimensions.", "")
 
 	if !strings.Contains(capturedPrompt, "ASSISTANT OUTPUT:") {
 		t.Error("empty question should use ASSISTANT OUTPUT: frame, not USER:/ASSISTANT:")
@@ -426,19 +426,16 @@ func TestSynthesizeQA_PromptHasTwoStageStructure(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	_, _ = s.SynthesizeQA(context.Background(), "q", "a")
+	_, _ = s.SynthesizeQA(context.Background(), "q", "a", "")
 
 	if !strings.Contains(capturedPrompt, "STAGE 1: VALUE GATE") {
 		t.Error("prompt should contain STAGE 1: VALUE GATE")
 	}
-	if !strings.Contains(capturedPrompt, "STAGE 2: REWRITE") {
-		t.Error("prompt should contain STAGE 2: REWRITE")
+	if !strings.Contains(capturedPrompt, "STAGE 2: REWRITE AS A SIGNPOST") {
+		t.Error("prompt should contain STAGE 2: REWRITE AS A SIGNPOST")
 	}
-	if !strings.Contains(capturedPrompt, "journalistic prose") {
-		t.Error("prompt should instruct journalistic prose output")
-	}
-	if !strings.Contains(capturedPrompt, "Accept that value without question") {
-		t.Error("prompt should instruct unconditional acceptance of raw value")
+	if !strings.Contains(capturedPrompt, "SIGNPOST FOR FUTURE AGENTS") {
+		t.Error("prompt should frame as signpost for future agents")
 	}
 }
 
@@ -449,12 +446,57 @@ func TestSynthesizeQA_APIError(t *testing.T) {
 	defer server.Close()
 
 	s := New("sk-test", server.URL)
-	_, err := s.SynthesizeQA(context.Background(), "q", "a")
+	_, err := s.SynthesizeQA(context.Background(), "q", "a", "")
 	if err == nil {
 		t.Error("expected error on API failure")
 	}
 	if !strings.Contains(err.Error(), "503") {
 		t.Errorf("error should contain status code, got: %v", err)
+	}
+}
+
+func TestSynthesizeQA_TopicHintIncluded(t *testing.T) {
+	var capturedPrompt string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		msgs := body["messages"].([]any)
+		msg := msgs[0].(map[string]any)
+		capturedPrompt = msg["content"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mockAnthropicResponse("SKIP"))
+	}))
+	defer server.Close()
+
+	s := New("sk-test", server.URL)
+	_, _ = s.SynthesizeQA(context.Background(), "q", "a", "fix the billing service | update k8s manifests")
+
+	if !strings.Contains(capturedPrompt, "SURROUNDING TOPIC CONTEXT") {
+		t.Error("prompt should include SURROUNDING TOPIC CONTEXT when topicHint is provided")
+	}
+	if !strings.Contains(capturedPrompt, "fix the billing service | update k8s manifests") {
+		t.Error("prompt should include the actual topic hint text")
+	}
+}
+
+func TestSynthesizeQA_NoTopicHint(t *testing.T) {
+	var capturedPrompt string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		msgs := body["messages"].([]any)
+		msg := msgs[0].(map[string]any)
+		capturedPrompt = msg["content"].(string)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(mockAnthropicResponse("SKIP"))
+	}))
+	defer server.Close()
+
+	s := New("sk-test", server.URL)
+	_, _ = s.SynthesizeQA(context.Background(), "q", "a", "")
+
+	if strings.Contains(capturedPrompt, "SURROUNDING TOPIC CONTEXT (for anchoring") {
+		t.Error("prompt should NOT include topic context block when topicHint is empty")
 	}
 }
 
@@ -478,11 +520,11 @@ func TestSynthesize_PromptContainsJournalisticInstruction(t *testing.T) {
 	s := New("sk-test", server.URL)
 	_, _ = s.Synthesize(context.Background(), []string{"chunk one", "chunk two"})
 
-	if !strings.Contains(capturedPrompt, "journalistic prose") {
-		t.Error("Synthesize prompt should instruct journalistic prose")
+	if !strings.Contains(capturedPrompt, "SIGNPOST FOR FUTURE AGENTS") {
+		t.Error("Synthesize prompt should frame as signpost for future agents")
 	}
-	if !strings.Contains(capturedPrompt, "Accept the raw informational value") {
-		t.Error("Synthesize prompt should instruct accepting raw value")
+	if !strings.Contains(capturedPrompt, "aha moments") {
+		t.Error("Synthesize prompt should focus on aha moments")
 	}
 }
 
@@ -506,11 +548,11 @@ func TestSynthesizeConversation_PromptContainsJournalisticInstruction(t *testing
 	}
 	_, _ = s.SynthesizeConversation(context.Background(), turns)
 
-	if !strings.Contains(capturedPrompt, "journalistic prose") {
-		t.Error("SynthesizeConversation prompt should instruct journalistic prose")
+	if !strings.Contains(capturedPrompt, "SIGNPOST FOR FUTURE AGENTS") {
+		t.Error("SynthesizeConversation prompt should frame as signpost for future agents")
 	}
-	if !strings.Contains(capturedPrompt, "Accept the raw informational value") {
-		t.Error("SynthesizeConversation prompt should instruct accepting raw value")
+	if !strings.Contains(capturedPrompt, "what was DISCOVERED, not what was DONE") {
+		t.Error("SynthesizeConversation prompt should focus on discoveries not tasks")
 	}
 }
 
@@ -582,7 +624,7 @@ func TestAzure_SynthesizeQA(t *testing.T) {
 		APIVersion: "2024-06-01",
 		APIKey:     "test-key-123",
 	})
-	result, err := s.SynthesizeQA(context.Background(), "How does the proxy work?", "It binds to 127.0.0.1:7432.")
+	result, err := s.SynthesizeQA(context.Background(), "How does the proxy work?", "It binds to 127.0.0.1:7432.", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -613,7 +655,7 @@ func TestAzure_SKIP(t *testing.T) {
 		APIVersion: "2024-06-01",
 		APIKey:     "test-key",
 	})
-	result, err := s.SynthesizeQA(context.Background(), "q", "a")
+	result, err := s.SynthesizeQA(context.Background(), "q", "a", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

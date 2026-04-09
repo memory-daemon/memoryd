@@ -206,7 +206,7 @@ func (a *apiHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	// --- Haiku LLM quality gate (when available) or raw storage fallback ---
 	if a.synth.Available() {
-		entry, err := a.synth.SynthesizeQA(ctx, req.UserPrompt, req.AssistantResponse)
+		entry, err := a.synth.SynthesizeQA(ctx, req.UserPrompt, req.AssistantResponse, "")
 		if err != nil {
 			writeJSON(w, 500, map[string]string{"error": "synthesis error: " + err.Error()})
 			return

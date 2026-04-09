@@ -567,7 +567,7 @@ func TestWriteResult_SummaryWithMerged(t *testing.T) {
 
 func TestCosineSim_Identical(t *testing.T) {
 	v := []float32{1, 2, 3, 4}
-	sim := cosineSim(v, v)
+	sim := CosineSim(v, v)
 	if sim < 0.999 {
 		t.Errorf("expected ~1.0 for identical vectors, got %f", sim)
 	}
@@ -576,14 +576,14 @@ func TestCosineSim_Identical(t *testing.T) {
 func TestCosineSim_Orthogonal(t *testing.T) {
 	a := []float32{1, 0, 0}
 	b := []float32{0, 1, 0}
-	sim := cosineSim(a, b)
+	sim := CosineSim(a, b)
 	if sim > 0.001 {
 		t.Errorf("expected ~0 for orthogonal vectors, got %f", sim)
 	}
 }
 
 func TestCosineSim_Empty(t *testing.T) {
-	sim := cosineSim(nil, nil)
+	sim := CosineSim(nil, nil)
 	if sim != 0 {
 		t.Errorf("expected 0 for empty vectors, got %f", sim)
 	}
