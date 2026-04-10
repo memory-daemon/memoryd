@@ -216,6 +216,17 @@ func (h *anthropicHandler) ingest(rawReq map[string]json.RawMessage, assistantTe
 func (h *anthropicHandler) gateAndBuffer(ctx context.Context, userMsg, assistantText string) {
 	pCfg := h.write.Config()
 
+	// Discovery bypass — when the assistant shows surprise/discovery language,
+	// skip all cheap gates and go straight to synthesis. These exchanges are
+	// very likely to contain non-obvious insights worth preserving.
+	if rejection.DiscoverySignal(assistantText) {
+		log.Printf("[proxy] discovery-signal: bypassing pre-filters (assistant shows discovery language)")
+		vec, _ := h.write.EmbedText(ctx, assistantText)
+		h.xbuf.Add(userMsg, assistantText, vec, true)
+		h.storeExchange(ctx, userMsg, assistantText, vec)
+		return
+	}
+
 	// Gate 1: String-match pre-filter (cheapest — no embedding needed).
 	// Catches pure acks ("I'll do that") that carry no topical signal.
 	if userMsg != "" && rejection.QuickFilter(userMsg, assistantText) {
@@ -262,18 +273,20 @@ func (h *anthropicHandler) synthesizeAndStore(ctx context.Context, userMsg, assi
 	topicCtx := h.xbuf.TopicalContext(vec, pipeline.TopicBoundaryThreshold)
 
 	go func() {
-		entry, err := h.synth.SynthesizeQA(ctx, userMsg, assistantText, topicCtx)
+		facts, err := h.synth.SynthesizeQA(ctx, userMsg, assistantText, topicCtx)
 		if err != nil {
 			log.Printf("[proxy] SynthesizeQA error: %v — skipping (quality gate)", err)
 			return
 		}
-		if entry == "" {
+		if len(facts) == 0 {
 			h.rejLog.Add(rejection.StageSynthesizer, userMsg, assistantText)
 			log.Printf("[proxy] SynthesizeQA: exchange skipped (no durable value)")
 			return
 		}
-		h.write.ProcessDirect(entry, "claude-code", nil)
-		log.Printf("[proxy] SynthesizeQA: stored entry (%d chars)", len(entry))
+		for _, fact := range facts {
+			h.write.ProcessDirect(fact, "claude-code", nil)
+		}
+		log.Printf("[proxy] SynthesizeQA: stored %d atomic fact(s)", len(facts))
 	}()
 }
 

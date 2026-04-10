@@ -239,6 +239,9 @@
       <div class="nav-item" data-page="pipeline">
         <span class="nav-icon">&#9783;</span> Pipeline
       </div>
+      <div class="nav-item" data-page="prompts">
+        <span class="nav-icon">&#9998;</span> Prompts
+      </div>
       <div class="nav-item" data-page="logs">
         <span class="nav-icon">&#9776;</span> Logs
       </div>
@@ -607,6 +610,35 @@
             <span class="pipeline-note" id="pipelineNote"></span>
             <span class="pipeline-status" id="pipelineStatus"></span>
             <button class="btn btn-primary" id="savePipelineBtn" onclick="savePipeline()">Save changes</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- PAGE: Prompts -->
+      <div class="page" id="page-prompts">
+        <div class="page-title">Prompts</div>
+        <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;max-width:720px;line-height:1.6">These are the default prompt templates sent to the LLM for each synthesis task. They control what gets stored and how it gets written.</p>
+        <div class="card">
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Quality Gate &amp; Atomic Decomposition (SynthesizeQA)</div>
+            <div class="pipeline-field pipeline-protos">
+              <label>Used for every proxy-captured exchange — the mandatory Haiku call</label>
+              <textarea id="prompt_qa" rows="20" readonly style="background:var(--bg);cursor:default;opacity:0.85"></textarea>
+            </div>
+          </div>
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Fragment Merge (Synthesize)</div>
+            <div class="pipeline-field pipeline-protos">
+              <label>Merges related chunks within a topic group into a single entry</label>
+              <textarea id="prompt_merge" rows="12" readonly style="background:var(--bg);cursor:default;opacity:0.85"></textarea>
+            </div>
+          </div>
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Session Summary (SynthesizeConversation)</div>
+            <div class="pipeline-field pipeline-protos">
+              <label>Distills a multi-turn coding session into structured insights</label>
+              <textarea id="prompt_conversation" rows="18" readonly style="background:var(--bg);cursor:default;opacity:0.85"></textarea>
+            </div>
           </div>
         </div>
       </div>
@@ -1132,6 +1164,19 @@ async function loadPipelineConfig() {
   }
 }
 
+async function loadPrompts() {
+  try {
+    const r = await authFetch(BASE + '/api/prompts');
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById('prompt_qa').value = d.qa || '';
+    document.getElementById('prompt_merge').value = d.merge || '';
+    document.getElementById('prompt_conversation').value = d.conversation || '';
+  } catch(e) {
+    console.error('Prompts load failed:', e);
+  }
+}
+
 async function savePipeline() {
   const btn = document.getElementById('savePipelineBtn');
   const status = document.getElementById('pipelineStatus');
@@ -1379,6 +1424,7 @@ loadDashboard();
 loadKnowledge();
 loadDatabases();
 loadPipelineConfig();
+loadPrompts();
 loadSettings();
 setInterval(checkHealth, 10000);
 setInterval(loadDashboard, 15000);

@@ -237,14 +237,14 @@ func TestOptions(t *testing.T) {
 // SynthesizeQA tests
 // ---------------------------------------------------------------------------
 
-func TestSynthesizeQA_Unavailable_ReturnsEmpty(t *testing.T) {
+func TestSynthesizeQA_Unavailable_ReturnsNil(t *testing.T) {
 	s := New("", "http://unused")
 	result, err := s.SynthesizeQA(context.Background(), "question?", "answer.", "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "" {
-		t.Errorf("expected empty result when unavailable, got: %q", result)
+	if len(result) != 0 {
+		t.Errorf("expected nil result when unavailable, got: %v", result)
 	}
 }
 
@@ -254,12 +254,12 @@ func TestSynthesizeQA_NilSynthesizer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nil Synthesizer.SynthesizeQA() should not error: %v", err)
 	}
-	if result != "" {
-		t.Errorf("expected empty result for nil synthesizer, got: %q", result)
+	if len(result) != 0 {
+		t.Errorf("expected nil result for nil synthesizer, got: %v", result)
 	}
 }
 
-func TestSynthesizeQA_SKIP_ReturnsEmpty(t *testing.T) {
+func TestSynthesizeQA_SKIP_ReturnsNil(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(mockAnthropicResponse("SKIP"))
@@ -271,8 +271,8 @@ func TestSynthesizeQA_SKIP_ReturnsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "" {
-		t.Errorf("expected empty result for SKIP, got: %q", result)
+	if len(result) != 0 {
+		t.Errorf("expected nil result for SKIP, got: %v", result)
 	}
 }
 
@@ -288,8 +288,8 @@ func TestSynthesizeQA_SKIP_WithWhitespace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "" {
-		t.Errorf("SKIP with whitespace should still return empty, got: %q", result)
+	if len(result) != 0 {
+		t.Errorf("SKIP with whitespace should still return nil, got: %v", result)
 	}
 }
 
@@ -306,8 +306,8 @@ func TestSynthesizeQA_SKIP_WithExplanation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "" {
-		t.Errorf("SKIP with explanation should return empty, got: %q", result)
+	if len(result) != 0 {
+		t.Errorf("SKIP with explanation should return nil, got: %v", result)
 	}
 }
 
@@ -323,16 +323,16 @@ func TestSynthesizeQA_SKIP_WithSpaceExplanation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "" {
-		t.Errorf("SKIP with space-separated explanation should return empty, got: %q", result)
+	if len(result) != 0 {
+		t.Errorf("SKIP with space-separated explanation should return nil, got: %v", result)
 	}
 }
 
-func TestSynthesizeQA_StagePreamble_ReturnsEmpty(t *testing.T) {
-	// Haiku sometimes echoes the prompt structure: "STAGE 1: VALUE GATE\nThis text..."
+func TestSynthesizeQA_NoPrefixLine_ReturnsNil(t *testing.T) {
+	// When the model outputs garbage without FACT: or SKIP prefixes, return nil.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(mockAnthropicResponse("STAGE 1: VALUE GATE\nThis text contains procedural narration about reading code."))
+		w.Write(mockAnthropicResponse("This text contains procedural narration about reading code."))
 	}))
 	defer server.Close()
 
@@ -341,16 +341,17 @@ func TestSynthesizeQA_StagePreamble_ReturnsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "" {
-		t.Errorf("STAGE preamble should return empty, got: %q", result)
+	if len(result) != 0 {
+		t.Errorf("unprefixed output should return nil, got: %v", result)
 	}
 }
 
-func TestSynthesizeQA_ReturnsContent(t *testing.T) {
-	const synthesized = "The proxy server in internal/proxy/proxy.go binds to 127.0.0.1:7432 and enriches requests via the read pipeline before forwarding to the upstream Anthropic API."
+func TestSynthesizeQA_ReturnsFacts(t *testing.T) {
+	const fact1 = "The proxy server in internal/proxy/proxy.go binds to 127.0.0.1:7432 and enriches requests via the read pipeline before forwarding to the upstream Anthropic API."
+	const fact2 = "Config key proxy.port defaults to 7432 because it avoids conflicts with common services."
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(mockAnthropicResponse(synthesized))
+		w.Write(mockAnthropicResponse("FACT: " + fact1 + "\nFACT: " + fact2))
 	}))
 	defer server.Close()
 
@@ -359,8 +360,14 @@ func TestSynthesizeQA_ReturnsContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != synthesized {
-		t.Errorf("expected synthesized content, got: %q", result)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 facts, got %d: %v", len(result), result)
+	}
+	if result[0] != fact1 {
+		t.Errorf("fact[0] = %q, want %q", result[0], fact1)
+	}
+	if result[1] != fact2 {
+		t.Errorf("fact[1] = %q, want %q", result[1], fact2)
 	}
 }
 
@@ -412,7 +419,7 @@ func TestSynthesizeQA_EmptyQuestion_UsesAssistantOutputFrame(t *testing.T) {
 	}
 }
 
-func TestSynthesizeQA_PromptHasTwoStageStructure(t *testing.T) {
+func TestSynthesizeQA_PromptHasUnifiedStructure(t *testing.T) {
 	var capturedPrompt string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -428,14 +435,17 @@ func TestSynthesizeQA_PromptHasTwoStageStructure(t *testing.T) {
 	s := New("sk-test", server.URL)
 	_, _ = s.SynthesizeQA(context.Background(), "q", "a", "")
 
-	if !strings.Contains(capturedPrompt, "STAGE 1: VALUE GATE") {
-		t.Error("prompt should contain STAGE 1: VALUE GATE")
+	if !strings.Contains(capturedPrompt, "VALUE GATE") {
+		t.Error("prompt should contain VALUE GATE")
 	}
-	if !strings.Contains(capturedPrompt, "STAGE 2: REWRITE AS A SIGNPOST") {
-		t.Error("prompt should contain STAGE 2: REWRITE AS A SIGNPOST")
+	if !strings.Contains(capturedPrompt, "DECOMPOSE") {
+		t.Error("prompt should contain DECOMPOSE step")
 	}
-	if !strings.Contains(capturedPrompt, "SIGNPOST FOR FUTURE AGENTS") {
-		t.Error("prompt should frame as signpost for future agents")
+	if !strings.Contains(capturedPrompt, "FACT: ") {
+		t.Error("prompt should instruct FACT: output format")
+	}
+	if !strings.Contains(capturedPrompt, "ATOMIC FACTS") {
+		t.Error("prompt should reference atomic facts")
 	}
 }
 
@@ -605,7 +615,7 @@ func TestAzure_NotAvailable_NoEndpoint(t *testing.T) {
 }
 
 func TestAzure_SynthesizeQA(t *testing.T) {
-	const synthesized = "The proxy server binds to 127.0.0.1:7432."
+	const fact1 = "The proxy server binds to 127.0.0.1:7432."
 	var capturedPath string
 	var capturedAPIKey string
 	var capturedBody map[string]any
@@ -614,7 +624,7 @@ func TestAzure_SynthesizeQA(t *testing.T) {
 		capturedAPIKey = r.Header.Get("api-key")
 		json.NewDecoder(r.Body).Decode(&capturedBody)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(mockAzureResponse(synthesized))
+		w.Write(mockAzureResponse("FACT: " + fact1))
 	}))
 	defer server.Close()
 
@@ -628,8 +638,8 @@ func TestAzure_SynthesizeQA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != synthesized {
-		t.Errorf("unexpected result: %q", result)
+	if len(result) != 1 || result[0] != fact1 {
+		t.Errorf("unexpected result: %v", result)
 	}
 	if capturedPath != "/openai/v1/chat/completions" {
 		t.Errorf("unexpected request path: %s", capturedPath)
@@ -659,8 +669,8 @@ func TestAzure_SKIP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "" {
-		t.Errorf("expected empty result for SKIP, got: %q", result)
+	if len(result) != 0 {
+		t.Errorf("expected nil result for SKIP, got: %v", result)
 	}
 }
 

@@ -48,6 +48,7 @@ func registerAPI(mux *http.ServeMux, st store.Store, read *pipeline.ReadPipeline
 	mux.HandleFunc("/api/databases", h.handleDatabases)
 	mux.HandleFunc("/api/databases/", h.handleDatabaseByName)
 	mux.HandleFunc("/api/pipeline", h.handlePipelineConfig)
+	mux.HandleFunc("/api/prompts", h.handlePrompts)
 	mux.HandleFunc("/api/rejections", h.handleRejections)
 	mux.HandleFunc("/api/settings", h.handleSettings)
 	mux.HandleFunc("/api/export", h.handleExport)
@@ -206,23 +207,26 @@ func (a *apiHandler) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	// --- Haiku LLM quality gate (when available) or raw storage fallback ---
 	if a.synth.Available() {
-		entry, err := a.synth.SynthesizeQA(ctx, req.UserPrompt, req.AssistantResponse, "")
+		facts, err := a.synth.SynthesizeQA(ctx, req.UserPrompt, req.AssistantResponse, "")
 		if err != nil {
 			writeJSON(w, 500, map[string]string{"error": "synthesis error: " + err.Error()})
 			return
 		}
-		if entry == "" {
+		if len(facts) == 0 {
 			a.rejLog.Add(rejection.StageSynthesizer, req.UserPrompt, req.AssistantResponse)
 			writeJSON(w, 200, map[string]any{"stage": "synthesizer_skip", "stored": 0})
 			return
 		}
 
-		result := a.write.ProcessDirect(entry, req.Source, nil)
+		var totalStored int
+		for _, fact := range facts {
+			result := a.write.ProcessDirect(fact, req.Source, nil)
+			totalStored += result.Stored
+		}
 		writeJSON(w, 200, map[string]any{
-			"stage":   "stored",
-			"stored":  result.Stored,
-			"entry":   entry,
-			"summary": result.Summary(),
+			"stage":  "stored",
+			"stored": totalStored,
+			"facts":  len(facts),
 		})
 	} else {
 		// No synthesizer — store raw Q&A through the chunking pipeline.
@@ -947,4 +951,14 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, 200, map[string]any{"lines": all, "total": len(all)})
+}
+
+// handlePrompts returns the default prompt templates used by the synthesizer.
+func (a *apiHandler) handlePrompts(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodGet {
+		writeJSON(w, 405, map[string]string{"error": "method not allowed"})
+		return
+	}
+	writeJSON(w, 200, synthesizer.PromptTemplates())
 }

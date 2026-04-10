@@ -1,0 +1,14 @@
+{
+  "active": true,
+  "backups": {
+    ".github/copilot-instructions.md": ".kindling/intel-backups/.github__copilot-instructions.md",
+    "CLAUDE.md": ".kindling/intel-backups/CLAUDE.md"
+  },
+  "written": [
+    ".github/copilot-instructions.md",
+    "CLAUDE.md",
+    ".cursor/rules/kindling.mdc",
+    ".windsurfrules"
+  ],
+  "last_interaction": "2026-04-09T19:14:01-07:00"
+}

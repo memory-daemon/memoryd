@@ -67,7 +67,7 @@ func TestExchangeBuffer_TopicalContext_FindsSimilar(t *testing.T) {
 	different := []float32{0, 1, 0}
 	query := []float32{0.9, 0.1, 0}
 
-	b.Add("related question", "a1", similar, false)    // sim ~0.99 with query
+	b.Add("related question", "a1", similar, false)     // sim ~0.99 with query
 	b.Add("unrelated question", "a2", different, false) // sim ~0.11 with query
 
 	got := b.TopicalContext(query, 0.5)

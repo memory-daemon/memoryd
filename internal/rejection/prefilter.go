@@ -90,7 +90,7 @@ var shortUserAcks = map[string]bool{
 	"got it.":      true,
 	"good":         true,
 	"good.":        true,
-	"👍":           true,
+	"👍":            true,
 	"lgtm":         true,
 }
 
@@ -115,6 +115,93 @@ func QuickFilter(userMsg, asstMsg string) bool {
 func hasProceduralPrefix(s string) bool {
 	for _, p := range proceduralAsstPrefixes {
 		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// discoverySignals are phrases that indicate the agent just made a non-obvious
+// finding — the "aha moment" pattern. When detected anywhere in the assistant
+// response, the exchange should bypass all pre-filters and go straight to
+// synthesis, because these are exactly the insights worth capturing.
+//
+// Patterns are matched case-insensitively against the first 500 chars of the
+// assistant response to keep the scan cheap.
+var discoverySignals = []string{
+	"interesting!",
+	"interesting —",
+	"interesting -",
+	"interestingly,",
+	"that's interesting",
+	"this is interesting",
+	"aha!",
+	"aha,",
+	"aha —",
+	"oh!",
+	"oh interesting",
+	"oh wait",
+	"oh, that",
+	"ah,",
+	"ah!",
+	"ah —",
+	"found it!",
+	"found the",
+	"here's the problem",
+	"here's the issue",
+	"here's what's happening",
+	"the root cause",
+	"root cause is",
+	"root cause:",
+	"the real issue",
+	"the actual problem",
+	"the actual issue",
+	"turns out",
+	"it turns out",
+	"this explains why",
+	"that explains why",
+	"that's why",
+	"this is why",
+	"the key insight",
+	"key finding",
+	"surprisingly,",
+	"this is surprising",
+	"unexpectedly,",
+	"counterintuitively",
+	"the trick is",
+	"the gotcha is",
+	"the catch is",
+	"important discovery",
+	"critical discovery",
+	"i didn't expect",
+	"we didn't expect",
+	"wasn't obvious",
+	"non-obvious",
+	"not obvious",
+	"the subtle",
+	"a subtle",
+	"wait —",
+	"wait,",
+	"actually,",
+	"actually!",
+	"actually —",
+}
+
+// discoverySignalScanLen is how far into the assistant text to scan for
+// discovery signals. Scanning the full response would be wasteful; the
+// exclamation of surprise is almost always in the first paragraph.
+const discoverySignalScanLen = 500
+
+// DiscoverySignal returns true when the assistant response contains language
+// indicating a non-obvious discovery or insight — an "aha moment". These
+// exchanges should bypass pre-filters and go straight to LLM synthesis.
+func DiscoverySignal(asstMsg string) bool {
+	text := strings.ToLower(strings.TrimSpace(asstMsg))
+	if len(text) > discoverySignalScanLen {
+		text = text[:discoverySignalScanLen]
+	}
+	for _, sig := range discoverySignals {
+		if strings.Contains(text, sig) {
 			return true
 		}
 	}
