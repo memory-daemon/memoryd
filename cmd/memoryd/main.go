@@ -226,6 +226,23 @@ func startCmd() *cobra.Command {
 					log.Printf("warning: content scorer unavailable, chunks will not be quality-scored: %v", err)
 				}
 
+				// Auto-enable llm_synthesis at startup if a credential exists
+				// but the toggle was never explicitly flipped. This makes the
+				// "set a key, get synthesis" path work without a second click.
+				if !cfg.LLMSynthesis {
+					hasAnthropic := config.GetAnthropicAPIKey() != ""
+					hasAzure := config.GetAzureAPIKey() != "" && cfg.Azure.Endpoint != "" && cfg.Azure.Deployment != ""
+					if hasAnthropic || hasAzure {
+						cfg.LLMSynthesis = true
+						yes := true
+						if err := config.SaveServerConfig(config.ServerSettings{LLMSynthesis: &yes}); err != nil {
+							log.Printf("auto-enable llm_synthesis: disk write failed: %v (in-memory still enabled)", err)
+						} else {
+							log.Printf("auto-enabled llm_synthesis (API key detected)")
+						}
+					}
+				}
+
 				if cfg.LLMSynthesis {
 					apiKey := config.GetAnthropicAPIKey()
 					azureKey := config.GetAzureAPIKey()

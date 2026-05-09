@@ -123,9 +123,15 @@ if [[ -z "$ATLAS_URI" ]]; then
   # Create vector search index.
   if [[ -f "$SCRIPT_DIR/scripts/create_index.js" ]]; then
     info "Creating vector search index..."
-    docker cp "$SCRIPT_DIR/scripts/create_index.js" memoryd-mongo:/tmp/create_index.js 2>/dev/null
-    docker exec memoryd-mongo mongosh memoryd --quiet --file /tmp/create_index.js 2>/dev/null || true
-    ok "Vector search index ready"
+    docker cp "$SCRIPT_DIR/scripts/create_index.js" memoryd-mongo:/tmp/create_index.js >/dev/null
+    INDEX_OUT=$(docker exec memoryd-mongo mongosh memoryd --quiet --file /tmp/create_index.js 2>&1) || true
+    if echo "$INDEX_OUT" | grep -qE 'INDEX CREATED|INDEX EXISTS'; then
+      ok "Vector search index ready"
+    else
+      info "Vector index script output:"
+      echo "$INDEX_OUT" | sed 's/^/    /'
+      fail "Vector search index creation may have failed — check output above"
+    fi
   else
     fail "scripts/create_index.js not found — vector search won't work"
     exit 1

@@ -134,6 +134,11 @@ func onReady() {
 						mToggle.Enable()
 						mDash.Enable()
 						mMode.Enable()
+						// Refresh systray title in case daemon became "running"
+						// before mongo finished connecting (otherwise title stays "M⚠").
+						if running {
+							systray.SetTitle("M●")
+						}
 					} else if mongoStr == "connecting" {
 						mMongo.SetTitle("MongoDB: 🔄 connecting...")
 					} else {

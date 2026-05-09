@@ -708,6 +708,7 @@ func (a *apiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Anthropic API key.
+		anthropicKeySet := false
 		if req.AnthropicKey != nil {
 			if *req.AnthropicKey == "" {
 				_ = credential.Delete("anthropic_api_key")
@@ -718,12 +719,14 @@ func (a *apiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				changes = append(changes, "anthropic_key")
+				anthropicKeySet = true
 			}
 			needRestart = true
 		}
 
 		// Azure OpenAI.
 		azureChanged := false
+		azureKeySet := false
 		azureCfg := a.cfg.Azure
 		if req.AzureEndpoint != nil {
 			azureCfg.Endpoint = *req.AzureEndpoint
@@ -747,6 +750,7 @@ func (a *apiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				changes = append(changes, "azure_key")
+				azureKeySet = true
 			}
 			azureChanged = true
 		}
@@ -758,6 +762,19 @@ func (a *apiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 			a.cfg.Azure = azureCfg
 			changes = append(changes, "azure")
 			needRestart = true
+		}
+
+		// Auto-enable LLM synthesis when an API key was just set, unless the
+		// caller explicitly opts out via server.llm_synthesis=false in the
+		// same request. Otherwise users have to set the key AND remember to
+		// flip the toggle, which is a confusing two-step.
+		explicitSynthOptOut := req.Server != nil && req.Server.LLMSynthesis != nil && !*req.Server.LLMSynthesis
+		if (anthropicKeySet || azureKeySet) && !a.cfg.LLMSynthesis && !explicitSynthOptOut {
+			yes := true
+			if err := config.SaveServerConfig(config.ServerSettings{LLMSynthesis: &yes}); err == nil {
+				a.cfg.LLMSynthesis = true
+				changes = append(changes, "llm_synthesis (auto-enabled)")
+			}
 		}
 
 		// Server-level settings (port, mongodb_database, model_path,
