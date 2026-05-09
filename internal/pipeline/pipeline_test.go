@@ -107,8 +107,8 @@ func TestReadPipeline_Retrieve_WithMatches(t *testing.T) {
 	if !strings.Contains(result, "vector search") {
 		t.Error("expected context to contain vector search")
 	}
-	if !strings.Contains(result, "<retrieved_context>") {
-		t.Error("expected XML tags in formatted context")
+	if !strings.Contains(result, "<memory>") {
+		t.Error("expected memory tags in formatted context")
 	}
 	if emb.calls != 1 {
 		t.Errorf("embedder called %d times, want 1", emb.calls)

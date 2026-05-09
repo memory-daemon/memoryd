@@ -407,12 +407,93 @@
                 <span class="field-hint">Stored in the OS keychain. Leave empty to disconnect.</span>
                 <span class="field-hint" id="s_mongo_status" style="margin-top:2px"></span>
               </div>
+              <div class="pipeline-field">
+                <label for="s_mongo_database">Default database name</label>
+                <input type="text" id="s_mongo_database" placeholder="memoryd" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                <span class="field-hint">MongoDB database used for the primary memories collection</span>
+              </div>
+              <div class="pipeline-field">
+                <label for="s_atlas_mode">Atlas mode</label>
+                <select id="s_atlas_mode" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                  <option value="false">Local / Atlas-local (Docker)</option>
+                  <option value="true">MongoDB Atlas (cloud)</option>
+                </select>
+                <span class="field-hint">Toggles search index management for hosted Atlas</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Server</div>
+            <div class="pipeline-grid">
+              <div class="pipeline-field">
+                <label for="s_port">Listen port</label>
+                <input type="number" id="s_port" min="1" max="65535" step="1" placeholder="7432" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                <span class="field-hint">HTTP port for the daemon (default 7432)</span>
+              </div>
+              <div class="pipeline-field" style="grid-column: 1 / -1">
+                <label for="s_upstream_url">Upstream Anthropic URL</label>
+                <input type="text" id="s_upstream_url" placeholder="https://api.anthropic.com" style="font-family:var(--mono);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                <span class="field-hint">Where the proxy forwards Anthropic requests to</span>
+              </div>
+              <div class="pipeline-field" style="grid-column: 1 / -1">
+                <label for="s_llm_synthesis">LLM synthesis</label>
+                <select id="s_llm_synthesis" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;max-width:320px">
+                  <option value="true">Enabled (use Haiku/Azure when configured)</option>
+                  <option value="false">Disabled (store raw exchanges only)</option>
+                </select>
+                <span class="field-hint">Globally toggle LLM-based synthesis</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Embedding model</div>
+            <div class="pipeline-grid">
+              <div class="pipeline-field" style="grid-column: 1 / -1">
+                <label for="s_model_path">Model path</label>
+                <input type="text" id="s_model_path" placeholder="~/.memoryd/models/voyage-4-nano.gguf" style="font-family:var(--mono);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                <span class="field-hint">GGUF file used by llama-server. Restart required.</span>
+              </div>
+              <div class="pipeline-field">
+                <label for="s_embedding_dim">Embedding dimension</label>
+                <input type="number" id="s_embedding_dim" min="1" max="8192" step="1" placeholder="1024" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                <span class="field-hint">Must match the model and the vector index</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pipeline-section">
+            <div class="pipeline-section-title">Retrieval</div>
+            <div class="pipeline-grid">
+              <div class="pipeline-field">
+                <label for="s_retrieval_top_k">Top K</label>
+                <input type="number" id="s_retrieval_top_k" min="1" max="100" step="1" placeholder="5" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                <span class="field-hint">Number of memories injected per query</span>
+              </div>
+              <div class="pipeline-field">
+                <label for="s_retrieval_max_tokens">Max tokens injected</label>
+                <input type="number" id="s_retrieval_max_tokens" min="1" max="65536" step="1" placeholder="2048" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;width:100%">
+                <span class="field-hint">Approximate token budget for the injected memory block</span>
+              </div>
             </div>
           </div>
 
           <div class="pipeline-section">
             <div class="pipeline-section-title">LLM synthesis <span style="font-weight:400;text-transform:none;letter-spacing:0">(distills conversations into knowledge)</span></div>
             <div style="padding:4px 0 12px;font-size:12px;color:var(--text-muted)">Configure <strong>one</strong> of the following. Anthropic (Haiku) is preferred; Azure OpenAI is the alternative. Without either, memoryd stores raw exchanges at reduced quality.</div>
+
+            <div class="pipeline-grid" style="margin-bottom:16px">
+              <div class="pipeline-field" style="grid-column: 1 / -1">
+                <label for="s_synthesis_provider">Active provider</label>
+                <select id="s_synthesis_provider" style="font-family:var(--font);font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text);outline:none;max-width:320px">
+                  <option value="auto">Auto (prefer Anthropic, fall back to Azure)</option>
+                  <option value="anthropic">Anthropic (Haiku) only</option>
+                  <option value="azure">Azure OpenAI only</option>
+                </select>
+                <span class="field-hint">Choose which backend to use when both are configured. Restart required.</span>
+              </div>
+            </div>
 
             <div style="margin-bottom:16px">
               <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:8px">Anthropic (Haiku)</div>
@@ -522,6 +603,16 @@
                 <label for="p_content_score_gate">Content score gate</label>
                 <input type="number" id="p_content_score_gate" min="0" max="1" step="0.05" value="0">
                 <span class="field-hint">0 = disabled · drop chunks scoring below this</span>
+              </div>
+              <div class="pipeline-field">
+                <label for="p_ingest_min_len">Ingest min length (chars)</label>
+                <input type="number" id="p_ingest_min_len" min="1" max="10000" step="1" value="80">
+                <span class="field-hint">Pre-Haiku gate: assistant responses shorter than this skip the LLM call</span>
+              </div>
+              <div class="pipeline-field">
+                <label for="p_content_score_pre_gate">Content score pre-gate</label>
+                <input type="number" id="p_content_score_pre_gate" min="0" max="1" step="0.05" value="0.35">
+                <span class="field-hint">0 = disabled · pre-Haiku noise gate on raw text</span>
               </div>
             </div>
           </div>
@@ -1147,6 +1238,8 @@ async function loadPipelineConfig() {
     document.getElementById('p_noise_min_len').value = p.noise_min_len ?? 20;
     document.getElementById('p_noise_min_alnum').value = p.noise_min_alnum_ratio ?? 0.4;
     document.getElementById('p_content_score_gate').value = p.content_score_gate ?? 0;
+    document.getElementById('p_ingest_min_len').value = p.ingest_min_len ?? 80;
+    document.getElementById('p_content_score_pre_gate').value = p.content_score_pre_gate ?? 0.35;
     document.getElementById('p_dedup_threshold').value = p.dedup_threshold ?? 0.92;
     document.getElementById('p_source_ext_threshold').value = p.source_extension_threshold ?? 0.75;
     document.getElementById('p_topic_boundary').value = p.topic_boundary_threshold ?? 0.65;
@@ -1215,6 +1308,8 @@ async function savePipeline() {
       noise_min_len: int('p_noise_min_len'),
       noise_min_alnum_ratio: num('p_noise_min_alnum'),
       content_score_gate: num('p_content_score_gate'),
+      ingest_min_len: int('p_ingest_min_len'),
+      content_score_pre_gate: num('p_content_score_pre_gate'),
       dedup_threshold: num('p_dedup_threshold'),
       source_extension_threshold: num('p_source_ext_threshold'),
       topic_boundary_threshold: num('p_topic_boundary'),
@@ -1264,18 +1359,38 @@ async function loadSettings() {
 
     document.getElementById('s_mode').value = d.mode || 'proxy';
 
-    // MongoDB
+    // Server-level
+    const sv = d.server || {};
+    document.getElementById('s_port').value = sv.port ?? '';
+    document.getElementById('s_mongo_database').value = sv.mongodb_database ?? '';
+    document.getElementById('s_atlas_mode').value = sv.atlas_mode ? 'true' : 'false';
+    document.getElementById('s_upstream_url').value = sv.upstream_anthropic_url ?? '';
+    document.getElementById('s_llm_synthesis').value = sv.llm_synthesis ? 'true' : 'false';
+    document.getElementById('s_synthesis_provider').value = sv.synthesis_provider || 'auto';
+    document.getElementById('s_model_path').value = sv.model_path ?? '';
+    document.getElementById('s_embedding_dim').value = sv.embedding_dim ?? '';
+    document.getElementById('s_retrieval_top_k').value = sv.retrieval_top_k ?? '';
+    document.getElementById('s_retrieval_max_tokens').value = sv.retrieval_max_tokens ?? '';
+
+    // MongoDB — show masked value as field value when configured so the user
+    // can see something is set. The save logic compares against data-loaded
+    // and only sends a new value if the user actually edited the field.
     const mongo = d.mongodb || {};
-    document.getElementById('s_mongo_uri').value = '';
-    document.getElementById('s_mongo_uri').placeholder = mongo.uri_masked || 'mongodb+srv://...';
-    document.getElementById('s_mongo_status').textContent = mongo.configured ? '✓ Configured' : '';
+    const mongoEl = document.getElementById('s_mongo_uri');
+    mongoEl.value = mongo.uri_masked || '';
+    mongoEl.dataset.loaded = mongoEl.value;
+    mongoEl.placeholder = mongo.configured ? '' : 'mongodb+srv://... or mongodb://localhost:27017/?directConnection=true';
+    document.getElementById('s_mongo_status').textContent = mongo.configured ? '✓ Configured (showing masked value — type to replace)' : 'Not configured';
     document.getElementById('s_mongo_status').style.color = mongo.configured ? 'var(--green)' : '';
 
     // Anthropic
     const anth = d.anthropic || {};
-    document.getElementById('s_anthropic_key').value = '';
-    document.getElementById('s_anthropic_key').placeholder = anth.key_masked || 'sk-ant-...';
-    document.getElementById('s_anthropic_status').textContent = anth.configured ? '✓ Configured' : '';
+    const anthEl = document.getElementById('s_anthropic_key');
+    anthEl.type = anth.configured ? 'text' : 'password';
+    anthEl.value = anth.key_masked || '';
+    anthEl.dataset.loaded = anthEl.value;
+    anthEl.placeholder = anth.configured ? '' : 'sk-ant-...';
+    document.getElementById('s_anthropic_status').textContent = anth.configured ? '✓ Configured (showing masked value — type to replace)' : 'Not configured';
     document.getElementById('s_anthropic_status').style.color = anth.configured ? 'var(--green)' : '';
 
     // Azure
@@ -1283,9 +1398,12 @@ async function loadSettings() {
     document.getElementById('s_azure_endpoint').value = az.endpoint || '';
     document.getElementById('s_azure_deployment').value = az.deployment || '';
     document.getElementById('s_azure_version').value = az.api_version || '';
-    document.getElementById('s_azure_key').value = '';
-    document.getElementById('s_azure_key').placeholder = az.key_masked || 'Paste your Azure API key';
-    document.getElementById('s_azure_status').textContent = az.configured ? '✓ Configured' : '';
+    const azEl = document.getElementById('s_azure_key');
+    azEl.type = az.configured ? 'text' : 'password';
+    azEl.value = az.key_masked || '';
+    azEl.dataset.loaded = azEl.value;
+    azEl.placeholder = az.configured ? '' : 'Paste your Azure API key';
+    document.getElementById('s_azure_status').textContent = az.configured ? '✓ Configured (showing masked value — type to replace)' : 'Not configured';
     document.getElementById('s_azure_status').style.color = az.configured ? 'var(--green)' : '';
   } catch(e) {
     console.error('Settings load failed:', e);
@@ -1307,23 +1425,61 @@ async function saveSettings() {
   // Mode — always send.
   payload.mode = document.getElementById('s_mode').value;
 
-  // MongoDB URI — only send if user typed something.
-  const mongoURI = document.getElementById('s_mongo_uri').value.trim();
-  if (mongoURI) payload.mongo_uri = mongoURI;
+  // MongoDB URI — only send if user typed something AND it differs from the
+  // masked value loaded from the server (otherwise we'd save the mask).
+  const mongoEl = document.getElementById('s_mongo_uri');
+  const mongoURI = mongoEl.value.trim();
+  if (mongoURI && mongoURI !== (mongoEl.dataset.loaded || '')) payload.mongo_uri = mongoURI;
 
-  // Anthropic key — only send if user typed something.
-  const anthropicKey = document.getElementById('s_anthropic_key').value.trim();
-  if (anthropicKey) payload.anthropic_key = anthropicKey;
+  // Anthropic key — same pattern.
+  const anthEl = document.getElementById('s_anthropic_key');
+  const anthropicKey = anthEl.value.trim();
+  if (anthropicKey && anthropicKey !== (anthEl.dataset.loaded || '')) payload.anthropic_key = anthropicKey;
 
   // Azure — send endpoint/deployment/version if any field has a value.
   const azEndpoint = document.getElementById('s_azure_endpoint').value.trim();
   const azDeploy = document.getElementById('s_azure_deployment').value.trim();
   const azVersion = document.getElementById('s_azure_version').value.trim();
-  const azKey = document.getElementById('s_azure_key').value.trim();
+  const azKeyEl = document.getElementById('s_azure_key');
+  const azKey = azKeyEl.value.trim();
   if (azEndpoint) payload.azure_endpoint = azEndpoint;
   if (azDeploy) payload.azure_deployment = azDeploy;
   if (azVersion) payload.azure_api_version = azVersion;
-  if (azKey) payload.azure_key = azKey;
+  if (azKey && azKey !== (azKeyEl.dataset.loaded || '')) payload.azure_key = azKey;
+
+  // Server-level fields. Only include keys whose inputs have a value so we
+  // don't overwrite existing config with blanks. Numeric inputs that are
+  // empty strings are skipped.
+  const server = {};
+  const numIfSet = (id) => {
+    const raw = document.getElementById(id).value;
+    if (raw === '' || raw === null) return undefined;
+    const v = parseInt(raw);
+    return isNaN(v) ? undefined : v;
+  };
+  const strIfSet = (id) => {
+    const v = document.getElementById(id).value.trim();
+    return v === '' ? undefined : v;
+  };
+  const port = numIfSet('s_port');
+  if (port !== undefined) server.port = port;
+  const dbName = strIfSet('s_mongo_database');
+  if (dbName !== undefined) server.mongodb_database = dbName;
+  const upstream = strIfSet('s_upstream_url');
+  if (upstream !== undefined) server.upstream_anthropic_url = upstream;
+  const modelPath = strIfSet('s_model_path');
+  if (modelPath !== undefined) server.model_path = modelPath;
+  const embDim = numIfSet('s_embedding_dim');
+  if (embDim !== undefined) server.embedding_dim = embDim;
+  const topK = numIfSet('s_retrieval_top_k');
+  if (topK !== undefined) server.retrieval_top_k = topK;
+  const maxTok = numIfSet('s_retrieval_max_tokens');
+  if (maxTok !== undefined) server.retrieval_max_tokens = maxTok;
+  // Booleans are always sent (their dropdowns always have a value).
+  server.atlas_mode = document.getElementById('s_atlas_mode').value === 'true';
+  server.llm_synthesis = document.getElementById('s_llm_synthesis').value === 'true';
+  server.synthesis_provider = document.getElementById('s_synthesis_provider').value;
+  payload.server = server;
 
   try {
     const r = await authFetch(BASE + '/api/settings', {

@@ -287,32 +287,37 @@ func (wp *WritePipeline) ProcessFiltered(text, source string, metadata map[strin
 			// Single-chunk group: use pre-computed embedding directly.
 			wp.storeMemory(ctx, g.chunks[0], g.vecs[0], source, metadata, &result)
 		} else {
-			// Multi-chunk group: synthesize or join, then re-embed.
-			var text string
-			if wp.synth.Available() {
-				synthesized, err := wp.synth.Synthesize(ctx, g.chunks)
-				if err != nil {
-					log.Printf("[write] synthesis error for topic group (%d chunks): %v — falling back to join", len(g.chunks), err)
-					text = strings.Join(g.chunks, "\n\n")
-				} else {
-					text = synthesized
-					log.Printf("[write] synthesized %d chunks into 1 topic memory (%d chars)", len(g.chunks), len(text))
-				}
-			} else {
-				text = strings.Join(g.chunks, "\n\n")
+			// Multi-chunk group: extract atomic facts (synthesizer) or store
+			// chunks individually (no synthesizer). Either way, each item stored
+			// is a separate memory — no compound blobs.
+			facts, err := wp.synth.Synthesize(ctx, g.chunks)
+			if err != nil {
+				log.Printf("[write] synthesis error for topic group (%d chunks): %v — storing chunks individually", len(g.chunks), err)
+				facts = g.chunks
 			}
 
-			vec, err := wp.embedder.Embed(ctx, text)
-			if err != nil {
-				log.Printf("[write] re-embed error for topic group (%d chunks): %v", len(g.chunks), err)
-				// Fall back to storing chunks individually with pre-computed embeddings.
+			if len(facts) == len(g.chunks) && &facts[0] == &g.chunks[0] {
+				// Synthesizer unavailable or returned chunks unchanged — use
+				// pre-computed embeddings directly.
 				for i, chunk := range g.chunks {
 					wp.storeMemory(ctx, chunk, g.vecs[i], source, metadata, &result)
 				}
-				continue
+			} else {
+				// Synthesizer returned extracted facts — batch-embed and store each.
+				factVecs, err := wp.embedder.EmbedBatch(ctx, facts)
+				if err != nil {
+					log.Printf("[write] batch embed error for %d facts: %v — storing chunks individually", len(facts), err)
+					for i, chunk := range g.chunks {
+						wp.storeMemory(ctx, chunk, g.vecs[i], source, metadata, &result)
+					}
+					continue
+				}
+				result.Merged += len(g.chunks) - 1
+				log.Printf("[write] synthesized %d chunks into %d atomic fact(s)", len(g.chunks), len(facts))
+				for i, fact := range facts {
+					wp.storeMemory(ctx, fact, factVecs[i], source, metadata, &result)
+				}
 			}
-			result.Merged += len(g.chunks) - 1
-			wp.storeMemory(ctx, text, vec, source, metadata, &result)
 		}
 	}
 	return result
@@ -341,6 +346,25 @@ func (wp *WritePipeline) storeMemory(ctx context.Context, content string, vec []
 	}
 
 	chunkMeta := metadata
+
+	// Supersession tagging: a new fact that is highly similar (but not identical)
+	// to an existing one likely updates or supersedes it. Tag the new memory so
+	// the store reflects the relationship without requiring a second LLM call.
+	const supersessionLow = 0.75
+	if closest != nil && closest.Score >= supersessionLow && closest.Score < pCfg.DedupThreshold {
+		if chunkMeta == nil {
+			chunkMeta = map[string]any{}
+		} else {
+			copied := make(map[string]any, len(chunkMeta)+1)
+			for k, v := range chunkMeta {
+				copied[k] = v
+			}
+			chunkMeta = copied
+		}
+		chunkMeta["supersedes"] = closest.ID.Hex()
+		log.Printf("[write] tagged new memory as superseding %s (sim=%.3f)", closest.ID.Hex(), closest.Score)
+	}
+
 	if closest != nil && strings.HasPrefix(closest.Source, "source:") &&
 		closest.Score >= pCfg.SourceExtensionThreshold {
 		if chunkMeta == nil {

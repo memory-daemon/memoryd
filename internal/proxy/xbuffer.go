@@ -118,6 +118,30 @@ func (b *exchangeBuffer) TopicalContext(vec []float32, threshold float64) string
 	return strings.Join(parts, "\n")
 }
 
+// SeenSimilar returns true when a previously-accepted exchange in the buffer
+// has cosine similarity >= threshold with vec. This prevents re-synthesizing
+// an exchange that was already processed — the same Q&A produces the same
+// embedding deterministically, but Haiku rephrases on each call, so fact-level
+// dedup misses it. Checking at the exchange level catches it cheaply.
+func (b *exchangeBuffer) SeenSimilar(vec []float32, threshold float64) bool {
+	if b == nil || vec == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for i := len(b.entries) - 1; i >= 0; i-- {
+		e := b.entries[i]
+		if !e.passed || e.vec == nil {
+			continue
+		}
+		if pipeline.CosineSim(e.vec, vec) >= threshold {
+			return true
+		}
+	}
+	return false
+}
+
 // Len returns the number of entries in the buffer. Useful for testing.
 func (b *exchangeBuffer) Len() int {
 	if b == nil {

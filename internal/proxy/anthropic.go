@@ -181,6 +181,10 @@ func (h *anthropicHandler) handleStream(w http.ResponseWriter, resp *http.Respon
 // ingest stores the assistant response, pairing it with the last user message
 // and optionally synthesizing a session summary.
 func (h *anthropicHandler) ingest(rawReq map[string]json.RawMessage, assistantText string) {
+	if h.write == nil {
+		log.Printf("[proxy] pipeline not ready, skipping ingest")
+		return
+	}
 	ctx := context.Background()
 	userMsg := extractLastUserMessage(rawReq)
 
@@ -198,13 +202,24 @@ func (h *anthropicHandler) ingest(rawReq map[string]json.RawMessage, assistantTe
 		pairs := countPairs(turns)
 		if pairs >= minSessionTurns && (pairs == minSessionTurns || pairs%sessionSynthesisInterval == 0) {
 			go func() {
-				summary, err := h.synth.SynthesizeConversation(ctx, turns)
+				// Strip code blocks from assistant turns before the session synthesis
+				// call — the Haiku context window is spent on prose facts, not implementations.
+				cleanedTurns := make([]synthesizer.ConversationTurn, len(turns))
+				for i, t := range turns {
+					if t.Role == "assistant" {
+						t.Content = stripFencedCode(t.Content)
+					}
+					cleanedTurns[i] = t
+				}
+				facts, err := h.synth.SynthesizeConversation(ctx, cleanedTurns)
 				if err != nil {
 					log.Printf("[proxy] session synthesis error: %v", err)
 					return
 				}
-				h.write.ProcessDirect(summary, "claude-code-session", nil)
-				log.Printf("[proxy] session summary stored (%d chars, %d turns)", len(summary), len(turns))
+				for _, fact := range facts {
+					h.write.ProcessDirect(fact, "claude-code-session", nil)
+				}
+				log.Printf("[proxy] session summary: stored %d fact(s) from %d turns", len(facts), len(turns))
 			}()
 		}
 	}
@@ -216,16 +231,27 @@ func (h *anthropicHandler) ingest(rawReq map[string]json.RawMessage, assistantTe
 func (h *anthropicHandler) gateAndBuffer(ctx context.Context, userMsg, assistantText string) {
 	pCfg := h.write.Config()
 
-	// Discovery bypass — when the assistant shows surprise/discovery language,
-	// skip all cheap gates and go straight to synthesis. These exchanges are
-	// very likely to contain non-obvious insights worth preserving.
+	// Discovery bypass — check on raw text before code stripping, since discovery
+	// language ("Wait, that's wrong", "Interesting!") lives in prose not code blocks.
 	if rejection.DiscoverySignal(assistantText) {
 		log.Printf("[proxy] discovery-signal: bypassing pre-filters (assistant shows discovery language)")
-		vec, _ := h.write.EmbedText(ctx, assistantText)
-		h.xbuf.Add(userMsg, assistantText, vec, true)
-		h.storeExchange(ctx, userMsg, assistantText, vec)
+		stripped := stripFencedCode(assistantText)
+		vec, _ := h.write.EmbedText(ctx, stripped)
+		if h.xbuf.SeenSimilar(vec, 0.85) {
+			h.xbuf.Add(userMsg, stripped, vec, false)
+			log.Printf("[proxy] exchange-dedup: similar discovery exchange already processed")
+			return
+		}
+		h.xbuf.Add(userMsg, stripped, vec, true)
+		h.storeExchange(ctx, userMsg, stripped, vec)
 		return
 	}
+
+	// Strip fenced code blocks before all downstream processing. Code blocks are
+	// implementations, not facts — the prose around them carries the extractable
+	// signal. Stripping here means the length gate, content scorer, and Haiku call
+	// all operate on prose quality rather than code volume.
+	assistantText = stripFencedCode(assistantText)
 
 	// Gate 1: String-match pre-filter (cheapest — no embedding needed).
 	// Catches pure acks ("I'll do that") that carry no topical signal.
@@ -244,12 +270,22 @@ func (h *anthropicHandler) gateAndBuffer(ctx context.Context, userMsg, assistant
 		return
 	}
 
-	// Embed once — used for content-score gate and exchange buffer.
+	// Embed once — used for exchange dedup, content-score gate, and exchange buffer.
 	// When no embedder is available, vec is nil and we skip similarity-based
 	// features but the pipeline still functions.
 	vec, _ := h.write.EmbedText(ctx, assistantText)
 
-	// Gate 3: Content score pre-gate — score against noise prototypes.
+	// Gate 3: Exchange-level dedup — skip synthesis if a similar exchange was
+	// already processed. The same Q&A always produces the same embedding, but
+	// Haiku rephrases on each call, so fact-level dedup (0.92) misses it.
+	// Checking at the exchange level catches it before the API call.
+	if h.xbuf.SeenSimilar(vec, 0.85) {
+		h.xbuf.Add(userMsg, assistantText, vec, false)
+		log.Printf("[proxy] exchange-dedup: similar exchange already processed (sim >= 0.85)")
+		return
+	}
+
+	// Gate 4: Content score pre-gate — score against noise prototypes.
 	//    Do NOT add to rejection store — scorer learns only from Haiku SKIP verdicts.
 	if pCfg.ContentScorePreGate > 0 && vec != nil {
 		if score, ok := h.write.ScoreVec(vec); ok && score < pCfg.ContentScorePreGate {
@@ -290,30 +326,17 @@ func (h *anthropicHandler) synthesizeAndStore(ctx context.Context, userMsg, assi
 	}()
 }
 
-// storeExchange routes to Haiku synthesis when available, otherwise stores raw.
+// storeExchange routes to Haiku synthesis when available. Without synthesis
+// there is no quality gate — raw assistant prose (narration, summaries,
+// markdown) produces noise rather than facts, so storage is skipped entirely.
+// The MCP memory_store tool remains available for explicit, curated storage.
 // vec is the pre-computed embedding of assistantText (may be nil).
 func (h *anthropicHandler) storeExchange(ctx context.Context, userMsg, assistantText string, vec []float32) {
 	if h.synth.Available() {
 		h.synthesizeAndStore(ctx, userMsg, assistantText, vec)
 	} else {
-		h.storeRaw(userMsg, assistantText)
+		log.Printf("[proxy] synthesis not configured — skipping storage (set ANTHROPIC_API_KEY to enable fact extraction)")
 	}
-}
-
-// storeRaw stores a Q&A exchange without LLM synthesis. Used as a fallback
-// when no Anthropic API key is available.
-func (h *anthropicHandler) storeRaw(userMsg, assistantText string) {
-	go func() {
-		var text string
-		if userMsg != "" {
-			text = fmt.Sprintf("Q: %s\n\nA: %s", userMsg, assistantText)
-		} else {
-			text = assistantText
-		}
-		result := h.write.ProcessFiltered(text, "claude-code", nil)
-		log.Printf("[proxy] stored raw exchange without synthesis (%d chars, stored=%d, dup=%d, filtered=%d)",
-			len(text), result.Stored, result.Duplicates, result.Filtered)
-	}()
 }
 
 // countPairs counts the number of complete user+assistant turn pairs.
@@ -430,9 +453,34 @@ func extractContentText(raw json.RawMessage) string {
 	return strings.Join(parts, "\n")
 }
 
-// formatQAPair formats a user question and assistant answer as a structured entry.
-func formatQAPair(question, answer string) string {
-	return fmt.Sprintf("**Q:** %s\n\n**A:** %s", strings.TrimSpace(question), strings.TrimSpace(answer))
+// stripFencedCode removes fenced code blocks (```...```) from text, leaving
+// surrounding prose intact. Inline code spans (`code`) are preserved because
+// they carry concrete anchors (function names, flags, error messages).
+// Unclosed fences are treated as extending to end-of-string.
+func stripFencedCode(text string) string {
+	for {
+		start := strings.Index(text, "```")
+		if start < 0 {
+			break
+		}
+		// Advance past the opening fence line.
+		lineEnd := strings.IndexByte(text[start:], '\n')
+		if lineEnd < 0 {
+			// Unclosed fence with no newline — drop to end.
+			text = strings.TrimSpace(text[:start])
+			break
+		}
+		searchFrom := start + lineEnd + 1
+		close := strings.Index(text[searchFrom:], "```")
+		if close < 0 {
+			// Unclosed fence — drop from opening to end.
+			text = strings.TrimSpace(text[:start])
+			break
+		}
+		closeAbs := searchFrom + close + 3 // +3 for the closing ``` chars
+		text = text[:start] + text[closeAbs:]
+	}
+	return strings.TrimSpace(text)
 }
 
 // extractConversationTurns parses all messages from the request into turns.

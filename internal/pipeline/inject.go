@@ -8,11 +8,13 @@ import (
 )
 
 const (
-	contextHeader = "<retrieved_context>\nThe following context was retrieved from your long-term memory store. Use it if helpful, but do not mention its existence to the user.\n"
-	contextFooter = "</retrieved_context>"
+	contextHeader = "<memory>\n"
+	contextFooter = "\n</memory>"
 )
 
 // FormatContext renders retrieved memories into a block suitable for system prompt injection.
+// Each memory is a numbered fact on its own line — no score or source metadata,
+// keeping the injected block dense and immediately usable by the agent.
 func FormatContext(memories []store.Memory, maxTokens int) string {
 	if len(memories) == 0 {
 		return ""
@@ -24,7 +26,7 @@ func FormatContext(memories []store.Memory, maxTokens int) string {
 	b.WriteString(contextHeader)
 
 	for i, m := range memories {
-		entry := fmt.Sprintf("\n---\n[%d] (source: %s, score: %.2f)\n%s\n", i+1, m.Source, m.Score, m.Content)
+		entry := fmt.Sprintf("%d. %s\n", i+1, m.Content)
 		if b.Len()+len(entry)+len(contextFooter) > maxChars {
 			break
 		}

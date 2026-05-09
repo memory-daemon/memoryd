@@ -365,3 +365,183 @@ func TestLoad_ModeField(t *testing.T) {
 		t.Errorf("mode = %q, want %q", cfg.Mode, ModeMCPReadOnly)
 	}
 }
+
+// --- SaveServerConfig tests ---
+
+func ptrInt(v int) *int             { return &v }
+func ptrStr(v string) *string       { return &v }
+func ptrBool(v bool) *bool          { return &v }
+
+func TestSaveServerConfig_PartialPatchPreservesOtherFields(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	if err := WriteDefault(); err != nil {
+		t.Fatalf("WriteDefault: %v", err)
+	}
+
+	// Patch only Port. Other fields should remain at defaults.
+	if err := SaveServerConfig(ServerSettings{Port: ptrInt(9999)}); err != nil {
+		t.Fatalf("SaveServerConfig: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Port != 9999 {
+		t.Errorf("port = %d, want 9999", cfg.Port)
+	}
+	if cfg.RetrievalTopK != Default.RetrievalTopK {
+		t.Errorf("retrieval_top_k changed unexpectedly: got %d want %d", cfg.RetrievalTopK, Default.RetrievalTopK)
+	}
+	if cfg.UpstreamAnthropicURL != Default.UpstreamAnthropicURL {
+		t.Errorf("upstream_anthropic_url changed unexpectedly: %q", cfg.UpstreamAnthropicURL)
+	}
+}
+
+func TestSaveServerConfig_AllFields(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	if err := WriteDefault(); err != nil {
+		t.Fatalf("WriteDefault: %v", err)
+	}
+
+	patch := ServerSettings{
+		Port:                 ptrInt(8080),
+		MongoDBDatabase:      ptrStr("custom_db"),
+		ModelPath:            ptrStr("/tmp/model.gguf"),
+		EmbeddingDim:         ptrInt(768),
+		RetrievalTopK:        ptrInt(7),
+		RetrievalMaxTokens:   ptrInt(4096),
+		UpstreamAnthropicURL: ptrStr("https://upstream.example"),
+		AtlasMode:            ptrBool(true),
+		LLMSynthesis:         ptrBool(false),
+		SynthesisProvider:    ptrStr(SynthesisAzure),
+	}
+	if err := SaveServerConfig(patch); err != nil {
+		t.Fatalf("SaveServerConfig: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Port != 8080 {
+		t.Errorf("port = %d", cfg.Port)
+	}
+	if cfg.MongoDBDatabase != "custom_db" {
+		t.Errorf("mongodb_database = %q", cfg.MongoDBDatabase)
+	}
+	if cfg.EmbeddingDim != 768 {
+		t.Errorf("embedding_dim = %d", cfg.EmbeddingDim)
+	}
+	if cfg.RetrievalTopK != 7 {
+		t.Errorf("retrieval_top_k = %d", cfg.RetrievalTopK)
+	}
+	if cfg.RetrievalMaxTokens != 4096 {
+		t.Errorf("retrieval_max_tokens = %d", cfg.RetrievalMaxTokens)
+	}
+	if cfg.UpstreamAnthropicURL != "https://upstream.example" {
+		t.Errorf("upstream_anthropic_url = %q", cfg.UpstreamAnthropicURL)
+	}
+	if !cfg.AtlasMode {
+		t.Errorf("atlas_mode = false, want true")
+	}
+	if cfg.LLMSynthesis {
+		t.Errorf("llm_synthesis = true, want false")
+	}
+	if cfg.SynthesisProvider != SynthesisAzure {
+		t.Errorf("synthesis_provider = %q, want %q", cfg.SynthesisProvider, SynthesisAzure)
+	}
+}
+
+func TestSaveServerConfig_PreservesOtherSections(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	dir := filepath.Join(tmp, ".memoryd")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Hand-craft yaml with steward + azure fields populated.
+	yaml := `port: 7432
+mode: proxy
+azure:
+    endpoint: "https://az.example"
+    deployment: "gpt-4o-mini"
+    api_version: "2024-06-01"
+steward:
+    interval_minutes: 30
+    prune_threshold: 0.2
+    grace_period_hours: 12
+    decay_half_days: 60
+    merge_threshold: 0.9
+    batch_size: 100
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(yaml), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SaveServerConfig(ServerSettings{Port: ptrInt(8888)}); err != nil {
+		t.Fatalf("SaveServerConfig: %v", err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Port != 8888 {
+		t.Errorf("port = %d", cfg.Port)
+	}
+	if cfg.Azure.Endpoint != "https://az.example" {
+		t.Errorf("azure endpoint lost: %q", cfg.Azure.Endpoint)
+	}
+	if cfg.Azure.Deployment != "gpt-4o-mini" {
+		t.Errorf("azure deployment lost: %q", cfg.Azure.Deployment)
+	}
+	if cfg.Steward.IntervalMinutes != 30 {
+		t.Errorf("steward interval_minutes lost: %d", cfg.Steward.IntervalMinutes)
+	}
+	if cfg.Steward.MergeThreshold != 0.9 {
+		t.Errorf("steward merge_threshold lost: %v", cfg.Steward.MergeThreshold)
+	}
+}
+
+// --- ValidSynthesisProvider tests ---
+
+func TestValidSynthesisProvider(t *testing.T) {
+	tests := []struct {
+		input string
+		want  bool
+	}{
+		{"", true},
+		{SynthesisAuto, true},
+		{SynthesisAnthropic, true},
+		{SynthesisAzure, true},
+		{"openai", false},
+		{"AUTO", false}, // case-sensitive
+		{"  ", false},
+		{"anthropic ", false},
+	}
+	for _, tt := range tests {
+		if got := ValidSynthesisProvider(tt.input); got != tt.want {
+			t.Errorf("ValidSynthesisProvider(%q) = %v, want %v", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestSynthesisProviderConstants(t *testing.T) {
+	// Guard against accidental string-value changes (yaml/JSON wire compat).
+	if SynthesisAuto != "auto" {
+		t.Errorf("SynthesisAuto = %q, want \"auto\"", SynthesisAuto)
+	}
+	if SynthesisAnthropic != "anthropic" {
+		t.Errorf("SynthesisAnthropic = %q, want \"anthropic\"", SynthesisAnthropic)
+	}
+	if SynthesisAzure != "azure" {
+		t.Errorf("SynthesisAzure = %q, want \"azure\"", SynthesisAzure)
+	}
+}

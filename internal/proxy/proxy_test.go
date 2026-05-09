@@ -321,22 +321,6 @@ func TestExtractContentText_Blocks(t *testing.T) {
 	}
 }
 
-func TestFormatQAPair(t *testing.T) {
-	result := formatQAPair("How do I handle errors?", "Use the errors package.")
-	if !strings.Contains(result, "**Q:**") {
-		t.Error("expected Q label")
-	}
-	if !strings.Contains(result, "**A:**") {
-		t.Error("expected A label")
-	}
-	if !strings.Contains(result, "How do I handle errors?") {
-		t.Error("expected question text")
-	}
-	if !strings.Contains(result, "Use the errors package.") {
-		t.Error("expected answer text")
-	}
-}
-
 func TestExtractConversationTurns_MultiTurn(t *testing.T) {
 	raw := map[string]json.RawMessage{
 		"messages": json.RawMessage(`[
@@ -483,5 +467,170 @@ func TestAnthropicHandler_UpstreamError(t *testing.T) {
 
 	if w.Code != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", w.Code)
+	}
+}
+
+// --- /api/settings GET tests ---
+
+func TestHandleSettings_GET_IncludesServerSection(t *testing.T) {
+	cfg := &config.Config{
+		Mode:                 "proxy",
+		Port:                 7432,
+		MongoDBAtlasURI:      "mongodb://localhost:27017/?directConnection=true",
+		MongoDBDatabase:      "memoryd",
+		ModelPath:            "/tmp/model.gguf",
+		EmbeddingDim:         1024,
+		RetrievalTopK:        5,
+		RetrievalMaxTokens:   2048,
+		UpstreamAnthropicURL: "https://api.anthropic.com",
+		AtlasMode:            false,
+		LLMSynthesis:         true,
+		SynthesisProvider:    config.SynthesisAuto,
+	}
+	a := &apiHandler{cfg: cfg}
+
+	req := httptest.NewRequest("GET", "/api/settings", nil)
+	w := httptest.NewRecorder()
+	a.handleSettings(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+
+	server, ok := resp["server"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing server section, got: %v", resp)
+	}
+	wantKeys := []string{"port", "mongodb_database", "model_path", "embedding_dim",
+		"retrieval_top_k", "retrieval_max_tokens", "upstream_anthropic_url",
+		"atlas_mode", "llm_synthesis", "synthesis_provider"}
+	for _, k := range wantKeys {
+		if _, ok := server[k]; !ok {
+			t.Errorf("server section missing key %q", k)
+		}
+	}
+	if got := server["synthesis_provider"]; got != "auto" {
+		t.Errorf("synthesis_provider = %v, want auto", got)
+	}
+
+	mongo := resp["mongodb"].(map[string]any)
+	if configured, _ := mongo["configured"].(bool); !configured {
+		t.Errorf("mongodb.configured = false, want true (URI is set on cfg)")
+	}
+	if mongo["uri_masked"] == "" {
+		t.Error("mongodb.uri_masked is empty for a configured URI")
+	}
+}
+
+func TestHandleSettings_GET_MongoFallbackWhenKeychainEmpty(t *testing.T) {
+	// Even with no keychain entry, a plain-text URI on cfg should report configured.
+	cfg := &config.Config{
+		Mode:            "proxy",
+		MongoDBAtlasURI: "mongodb://example.local:27017",
+	}
+	a := &apiHandler{cfg: cfg}
+	req := httptest.NewRequest("GET", "/api/settings", nil)
+	w := httptest.NewRecorder()
+	a.handleSettings(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	mongo := resp["mongodb"].(map[string]any)
+	if c, _ := mongo["configured"].(bool); !c {
+		t.Error("expected mongodb.configured=true when only cfg.MongoDBAtlasURI is set")
+	}
+}
+
+// --- /api/settings POST tests ---
+
+func TestHandleSettings_POST_RejectsInvalidSynthesisProvider(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	cfg := &config.Config{Mode: "proxy"}
+	a := &apiHandler{cfg: cfg}
+
+	body := `{"server":{"synthesis_provider":"openai"}}`
+	req := httptest.NewRequest("POST", "/api/settings", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	a.handleSettings(w, req)
+
+	if w.Code != 400 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "synthesis_provider") {
+		t.Errorf("error should mention synthesis_provider; got %s", w.Body.String())
+	}
+}
+
+func TestHandleSettings_POST_RejectsInvalidPort(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	cfg := &config.Config{Mode: "proxy"}
+	a := &apiHandler{cfg: cfg}
+
+	body := `{"server":{"port":99999}}`
+	req := httptest.NewRequest("POST", "/api/settings", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	a.handleSettings(w, req)
+
+	if w.Code != 400 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "port") {
+		t.Errorf("error should mention port; got %s", w.Body.String())
+	}
+}
+
+func TestHandleSettings_POST_PersistsServerFields(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	cfg := &config.Config{Mode: "proxy", Port: 7432}
+	a := &apiHandler{cfg: cfg}
+
+	body := `{"server":{"port":8080,"retrieval_top_k":11,"synthesis_provider":"azure","llm_synthesis":true}}`
+	req := httptest.NewRequest("POST", "/api/settings", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	a.handleSettings(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	// In-memory cfg updated.
+	if cfg.Port != 8080 {
+		t.Errorf("in-memory port = %d, want 8080", cfg.Port)
+	}
+	if cfg.RetrievalTopK != 11 {
+		t.Errorf("in-memory retrieval_top_k = %d, want 11", cfg.RetrievalTopK)
+	}
+	if cfg.SynthesisProvider != config.SynthesisAzure {
+		t.Errorf("in-memory synthesis_provider = %q, want azure", cfg.SynthesisProvider)
+	}
+	if !cfg.LLMSynthesis {
+		t.Errorf("in-memory llm_synthesis = false, want true")
+	}
+
+	// Persisted to disk.
+	loaded, err := config.Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.Port != 8080 {
+		t.Errorf("disk port = %d, want 8080", loaded.Port)
+	}
+	if loaded.SynthesisProvider != config.SynthesisAzure {
+		t.Errorf("disk synthesis_provider = %q, want azure", loaded.SynthesisProvider)
+	}
+
+	// Response indicates need_restart.
+	var resp map[string]any
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if nr, _ := resp["need_restart"].(bool); !nr {
+		t.Errorf("need_restart should be true after server changes")
 	}
 }

@@ -26,16 +26,17 @@ const skipSentinel = "SKIP"
 // in the dashboard so operators can see exactly what the LLM receives.
 
 // DefaultMergePrompt is the system prompt used by Synthesize() to merge
-// related text chunks into a single coherent memory entry.
-const DefaultMergePrompt = `You are a memory curator for an AI coding assistant's long-term knowledge store. Every entry you write is a SIGNPOST FOR FUTURE AGENTS. These fragments are related content that should be distilled into a single entry.
+// related text chunks into atomic facts. Uses the same FACT: format as
+// SynthesizeQA so parseFacts() handles both paths identically.
+const DefaultMergePrompt = `Extract every distinct technical fact from these related fragments. Remove duplication.
 
-A future AI assistant will search this memory store at the start of a new session to orient itself. Extract the core insights — the aha moments, gotchas, non-obvious facts, and decision rationale — and write them as a single signpost entry.
-
-Lead with the most important discovery. Every sentence should carry specific, concrete information: file paths, function names, config keys, error messages, version numbers, exact identifiers. No filler, no preamble.
-
-Write 2-8 sentences. Focus on what was LEARNED, not what was DONE. Include the "why" behind decisions. Omit task summaries, step sequences, and generic explanations. Each sentence should be independently useful as a search result.
-
-Output the entry directly. No preamble.
+Rules:
+- One fact per line, prefixed with "FACT: "
+- Lead with the concrete anchor: file path, function name, config key, error message.
+- State the fact and the reason. No narration, no preamble, no interpretation.
+- No forward-looking statements ("you should", "next time", "remember to").
+- 1-2 sentences per fact. Concrete identifiers only.
+- If there are no distinct technical facts, respond with exactly: SKIP
 
 Fragments:
 
@@ -44,25 +45,23 @@ Fragments:
 // DefaultQAPrompt is the system prompt used by SynthesizeQA() — the mandatory
 // quality gate for all proxy-captured content. It performs value gating, atomic
 // decomposition, and noise filtering in a single LLM call.
-const DefaultQAPrompt = `You are a memory curator for an AI coding assistant's long-term knowledge store. Your job is to extract ATOMIC FACTS — independent, self-contained pieces of durable knowledge — from coding exchanges.
+const DefaultQAPrompt = `Extract reusable technical facts from this coding exchange. Each fact must stand alone — one fact per line.
 
-Do ALL of the following in this single pass:
+GATE: Does this exchange contain a non-obvious technical fact? A fact is: a root cause, a gotcha, an error-fix pair, a config value that matters, an architectural constraint, a dependency quirk, a decision and its rationale, a performance characteristic.
 
-1. VALUE GATE — Does this exchange contain any non-obvious insight a future agent would benefit from? "Insight" means a discovery, gotcha, root cause, architectural fact, or decision rationale that saves a future agent from re-discovering it.
+NOT a fact: what someone did or plans to do, task progress, status updates, restatements of requirements, well-documented patterns, procedural narration. If there are no facts, respond with exactly: SKIP
 
-   Valuable: root causes of bugs, non-obvious gotchas, "why" behind a decision, architectural constraints, dependency quirks, config values that matter, error patterns and fixes, performance characteristics, integration patterns, design trade-offs.
+FORMAT:
+- Each fact on its own line, prefixed with "FACT: "
+- Lead with the specific anchor: file path, function name, config key, error message.
+- State the fact, then the reason. No interpretation, no advice, no hedging.
+- 1-2 sentences per fact. Concrete identifiers only.
 
-   Not valuable: procedural narration ("I looked at X", "I made the changes"), task completion summaries (duplicate git history), well-documented patterns, status updates, restatements of requirements. If NOTHING is valuable, respond with exactly: SKIP
+Bad: "The team discovered that the build was failing due to a caching issue and decided to fix it by clearing the cache."
+Good: "FACT: go build caches cgo artifacts by architecture — cross-compiling from arm64 to amd64 requires go clean -cache first or the linker emits symbol errors."
 
-2. DECOMPOSE — Break durable information into independent atomic facts. Each fact must stand alone as a useful search result with no dependency on the others. One insight per fact. Anchor each to a specific technical identifier (file path, function, config key, error message).
-
-3. FILTER NOISE — Discard surrounding chatter, procedural narration, and anything that duplicates git history. Keep only the atoms that carry genuine signal.
-
-OUTPUT FORMAT:
-- If nothing is worth storing: respond with exactly SKIP
-- Otherwise: output each atomic fact on its own line, prefixed with "FACT: "
-- Each fact should be 1-3 sentences. Lead with the technical anchor. Include the "why."
-- If a SURROUNDING TOPIC CONTEXT block is provided, use it to anchor facts in the right domain, but do not store the topic context itself.
+Bad: "I'll need to update the configuration to handle the new authentication requirements."
+Good: "FACT: OAuth2 PKCE flow in auth/handler.go requires code_verifier stored in session before the redirect — stateless mode breaks the exchange."
 
 ---
 [exchange]
@@ -71,40 +70,102 @@ OUTPUT FORMAT:
 Output FACT: lines or SKIP. Nothing else.`
 
 // DefaultConversationPrompt is the system prompt used by SynthesizeConversation()
-// to distill a multi-turn coding session into a structured memory entry.
-const DefaultConversationPrompt = `You are a memory curator for an AI coding assistant's long-term knowledge store. Every entry you write is a SIGNPOST FOR FUTURE AGENTS. This is a complete coding session arc.
+// to distill a multi-turn coding session into atomic facts. Uses the same FACT:
+// format as DefaultQAPrompt so parseFacts() handles all synthesis paths identically.
+const DefaultConversationPrompt = `Extract the reusable technical facts from this coding session. Ignore the task narrative — what was done is in git. Extract what is not in git: root causes, gotchas, constraints, rationale, non-obvious wiring.
 
-Extract the insights from this session that would help a future agent working on the same codebase. Focus on what was DISCOVERED, not what was DONE. A future agent can read git history to see what changed — what it cannot see is the reasoning, the gotchas, the dead ends, and the non-obvious root causes.
+GATE: If there are no non-obvious facts, respond with exactly: SKIP
 
-Write as a series of signposts, each anchored to a specific technical fact. Lead with the biggest aha moment. Every sentence should carry specific, concrete information: file paths, function names, config keys, error messages, exact identifiers.
+FORMAT:
+- Each fact on its own line, prefixed with "FACT: "
+- Lead with the concrete anchor: file path, function name, config key, error message.
+- State the fact and the reason. No narration, no "we discovered", no "this means".
+- No forward-looking language ("next time", "you should", "will need to").
+- No task summaries ("implemented X", "fixed Y", "added Z").
+- 1-2 sentences per fact. Concrete identifiers only.
 
-Extract these if present:
-- Non-obvious root causes and why they were hard to find
-- Gotchas, traps, and dead ends a future agent should avoid
-- Decisions made and the reasoning behind them (the "why" matters most)
-- Architectural facts discovered: how modules connect, data flow, dependency quirks
-- Config values, thresholds, or external dependencies that matter and why
-
-Omit:
-- Task summaries ("implemented X", "fixed Y", "added Z") — these duplicate git history
-- The sequence of steps taken
-- Restatements of the user's requirements
-- Generic explanations of well-documented patterns
-
-Write 3-10 sentences. Each sentence should be independently useful as a search result. Include the "why" behind every decision. Prefer precision over brevity. Under 300 words. Output directly, no preamble.
+Output FACT: lines or SKIP. Nothing else.
 
 Conversation:
 
 [turns]`
 
-// PromptTemplates returns the default prompt templates keyed by name.
-// Used by the dashboard to display the prompts operators can inspect.
-func PromptTemplates() map[string]string {
+// PromptTemplates returns the active prompt templates keyed by name.
+// Custom overrides take precedence over the built-in defaults.
+func (s *Synthesizer) PromptTemplates() map[string]string {
+	if s == nil {
+		return DefaultPromptTemplates()
+	}
+	m := DefaultPromptTemplates()
+	if s.customQA != "" {
+		m["qa"] = s.customQA
+	}
+	if s.customMerge != "" {
+		m["merge"] = s.customMerge
+	}
+	if s.customConversation != "" {
+		m["conversation"] = s.customConversation
+	}
+	return m
+}
+
+// DefaultPromptTemplates returns the built-in default prompt templates.
+func DefaultPromptTemplates() map[string]string {
 	return map[string]string{
 		"qa":           DefaultQAPrompt,
 		"merge":        DefaultMergePrompt,
 		"conversation": DefaultConversationPrompt,
 	}
+}
+
+// PromptTemplates is a package-level accessor returning the built-in default
+// prompt templates. Retained for backwards compatibility with callers that
+// don't have access to a Synthesizer instance.
+func PromptTemplates() map[string]string {
+	return DefaultPromptTemplates()
+}
+
+// SetCustomPrompts updates the custom prompt overrides. Empty strings
+// revert to the built-in defaults.
+func (s *Synthesizer) SetCustomPrompts(qa, merge, conversation string) {
+	if s == nil {
+		return
+	}
+	s.customQA = qa
+	s.customMerge = merge
+	s.customConversation = conversation
+}
+
+// CustomPrompts returns the current custom overrides (empty = using default).
+func (s *Synthesizer) CustomPrompts() (qa, merge, conversation string) {
+	if s == nil {
+		return "", "", ""
+	}
+	return s.customQA, s.customMerge, s.customConversation
+}
+
+// qaPrompt returns the active QA prompt (custom or default).
+func (s *Synthesizer) qaPrompt() string {
+	if s.customQA != "" {
+		return s.customQA
+	}
+	return DefaultQAPrompt
+}
+
+// mergePrompt returns the active merge prompt (custom or default).
+func (s *Synthesizer) mergePrompt() string {
+	if s.customMerge != "" {
+		return s.customMerge
+	}
+	return DefaultMergePrompt
+}
+
+// conversationPrompt returns the active conversation prompt (custom or default).
+func (s *Synthesizer) conversationPrompt() string {
+	if s.customConversation != "" {
+		return s.customConversation
+	}
+	return DefaultConversationPrompt
 }
 
 // ConversationTurn is a single message in a conversation arc.
@@ -128,6 +189,11 @@ type Synthesizer struct {
 	model     string
 	maxTokens int
 	minChunks int
+
+	// Custom prompt overrides — empty means use the Default* constants.
+	customQA           string
+	customMerge        string
+	customConversation string
 }
 
 // Option configures a Synthesizer.
@@ -348,18 +414,28 @@ func (az *azureBackend) complete(ctx context.Context, model string, maxTokens in
 	return strings.TrimSpace(result.Choices[0].Message.Content), nil
 }
 
-// Synthesize merges a set of related text chunks into a single coherent entry.
-// If len(chunks) < minChunks or the synthesizer is unavailable, it falls back
-// to joining with "\n\n".
-func (s *Synthesizer) Synthesize(ctx context.Context, chunks []string) (string, error) {
+// Synthesize extracts atomic facts from a set of related text chunks.
+// Returns each fact as a separate string via parseFacts().
+// If len(chunks) < minChunks or the synthesizer is unavailable, returns
+// the chunks unchanged so the caller can store them individually.
+func (s *Synthesizer) Synthesize(ctx context.Context, chunks []string) ([]string, error) {
 	if !s.Available() || len(chunks) < s.minChunks {
-		return strings.Join(chunks, "\n\n"), nil
+		return chunks, nil
 	}
 
 	combined := strings.Join(chunks, "\n\n---\n\n")
-	prompt := DefaultMergePrompt + combined
+	prompt := s.mergePrompt() + combined
 
-	return s.complete(ctx, prompt)
+	raw, err := s.complete(ctx, prompt)
+	if err != nil {
+		return nil, err
+	}
+	facts := parseFacts(raw)
+	if len(facts) == 0 {
+		// Model returned SKIP or nothing useful — fall back to storing chunks as-is.
+		return chunks, nil
+	}
+	return facts, nil
 }
 
 // SynthesizeQA is the mandatory quality gate for ALL proxy-captured content.
@@ -392,7 +468,7 @@ func (s *Synthesizer) SynthesizeQA(ctx context.Context, question, answer, topicH
 		topicBlock = fmt.Sprintf("\n\nSURROUNDING TOPIC CONTEXT (for anchoring only — do not store this directly):\n%s", topicHint)
 	}
 
-	prompt := strings.Replace(DefaultQAPrompt, "[exchange]", exchangeBlock+topicBlock, 1)
+	prompt := strings.Replace(s.qaPrompt(), "[exchange]", exchangeBlock+topicBlock, 1)
 
 	result, err := s.complete(ctx, prompt)
 	if err != nil {
@@ -421,16 +497,13 @@ func parseFacts(raw string) []string {
 	return facts
 }
 
-// SynthesizeConversation distills a multi-turn conversation into a structured
-// memory entry capturing the problem, approach, and resolution.
-func (s *Synthesizer) SynthesizeConversation(ctx context.Context, turns []ConversationTurn) (string, error) {
+// SynthesizeConversation distills a multi-turn coding session into atomic facts.
+// Returns each fact as a separate string. Returns (nil, nil) when the synthesizer
+// is unavailable or the conversation has fewer than 2 turns — callers should skip
+// storage in that case since the per-exchange path already handles individual turns.
+func (s *Synthesizer) SynthesizeConversation(ctx context.Context, turns []ConversationTurn) ([]string, error) {
 	if !s.Available() || len(turns) < 2 {
-		// Fall back: concatenate turns with role labels.
-		var parts []string
-		for _, t := range turns {
-			parts = append(parts, fmt.Sprintf("%s: %s", t.Role, t.Content))
-		}
-		return strings.Join(parts, "\n\n"), nil
+		return nil, nil
 	}
 
 	var convBuf strings.Builder
@@ -438,7 +511,13 @@ func (s *Synthesizer) SynthesizeConversation(ctx context.Context, turns []Conver
 		fmt.Fprintf(&convBuf, "**%s:** %s\n\n", t.Role, t.Content)
 	}
 
-	prompt := strings.Replace(DefaultConversationPrompt, "[turns]", convBuf.String(), 1)
+	prompt := strings.Replace(s.conversationPrompt(), "[turns]", convBuf.String(), 1)
 
-	return s.complete(ctx, prompt)
+	raw, err := s.complete(ctx, prompt)
+	if err != nil {
+		return nil, err
+	}
+	facts := parseFacts(raw)
+	// nil facts (SKIP or empty) is a valid signal — no storage needed.
+	return facts, nil
 }

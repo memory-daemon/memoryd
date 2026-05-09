@@ -61,7 +61,11 @@ func redactKeyValueLine(line string) string {
 		if idx == -1 {
 			continue
 		}
-		rest := line[idx+len(kw):]
+		endIdx := idx + len(kw)
+		if endIdx > len(line) {
+			continue
+		}
+		rest := line[endIdx:]
 		trimmed := strings.TrimLeft(rest, " \t\"'")
 		if len(trimmed) == 0 {
 			continue

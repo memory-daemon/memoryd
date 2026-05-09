@@ -43,19 +43,19 @@ func TestAvailable_WithAPIKey(t *testing.T) {
 	}
 }
 
-func TestSynthesize_Unavailable_FallsBackToJoin(t *testing.T) {
+func TestSynthesize_Unavailable_FallsBackToChunks(t *testing.T) {
 	s := New("", "http://unused")
 	chunks := []string{"chunk one", "chunk two", "chunk three"}
 	result, err := s.Synthesize(context.Background(), chunks)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "chunk one\n\nchunk two\n\nchunk three" {
-		t.Errorf("unexpected fallback result: %q", result)
+	if len(result) != 3 || result[0] != "chunk one" || result[1] != "chunk two" || result[2] != "chunk three" {
+		t.Errorf("expected chunks unchanged, got: %v", result)
 	}
 }
 
-func TestSynthesize_BelowMinChunks_FallsBackToJoin(t *testing.T) {
+func TestSynthesize_BelowMinChunks_FallsBackToChunks(t *testing.T) {
 	s := New("sk-key", "http://unused", WithMinChunks(3))
 	// Only 2 chunks — below minChunks=3.
 	chunks := []string{"first chunk", "second chunk"}
@@ -63,8 +63,8 @@ func TestSynthesize_BelowMinChunks_FallsBackToJoin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "first chunk\n\nsecond chunk" {
-		t.Errorf("expected joined fallback, got: %q", result)
+	if len(result) != 2 || result[0] != "first chunk" || result[1] != "second chunk" {
+		t.Errorf("expected chunks unchanged, got: %v", result)
 	}
 }
 
@@ -79,7 +79,7 @@ func TestSynthesize_CallsAPI(t *testing.T) {
 		}
 		json.NewDecoder(r.Body).Decode(&capturedBody)
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(mockAnthropicResponse("Synthesized content about Go concurrency."))
+		w.Write(mockAnthropicResponse("FACT: goroutines: Go uses goroutines for lightweight concurrency; channels are the primary communication mechanism."))
 	}))
 	defer server.Close()
 
@@ -92,8 +92,11 @@ func TestSynthesize_CallsAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Synthesize() error: %v", err)
 	}
-	if result != "Synthesized content about Go concurrency." {
-		t.Errorf("unexpected result: %q", result)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 fact, got %d: %v", len(result), result)
+	}
+	if !strings.Contains(result[0], "goroutines") {
+		t.Errorf("fact should contain 'goroutines', got: %q", result[0])
 	}
 
 	// Verify the prompt was sent.
@@ -121,7 +124,7 @@ func TestSynthesize_APIError(t *testing.T) {
 	}
 }
 
-func TestSynthesizeConversation_Unavailable_FallsBackToConcat(t *testing.T) {
+func TestSynthesizeConversation_Unavailable_ReturnsNil(t *testing.T) {
 	s := New("", "http://unused")
 	turns := []ConversationTurn{
 		{Role: "user", Content: "How do I fix this error?"},
@@ -131,15 +134,12 @@ func TestSynthesizeConversation_Unavailable_FallsBackToConcat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "user: How do I fix this error?") {
-		t.Errorf("fallback should contain user turn: %q", result)
-	}
-	if !strings.Contains(result, "assistant: You need to add a nil check.") {
-		t.Errorf("fallback should contain assistant turn: %q", result)
+	if result != nil {
+		t.Errorf("unavailable synthesizer should return nil, got: %v", result)
 	}
 }
 
-func TestSynthesizeConversation_SingleTurn_FallsBack(t *testing.T) {
+func TestSynthesizeConversation_SingleTurn_ReturnsNil(t *testing.T) {
 	s := New("sk-key", "http://unused")
 	turns := []ConversationTurn{
 		{Role: "user", Content: "Just one message."},
@@ -148,8 +148,8 @@ func TestSynthesizeConversation_SingleTurn_FallsBack(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "Just one message.") {
-		t.Errorf("fallback should include turn content: %q", result)
+	if result != nil {
+		t.Errorf("single-turn should return nil, got: %v", result)
 	}
 }
 
@@ -163,7 +163,7 @@ func TestSynthesizeConversation_CallsAPI(t *testing.T) {
 		capturedPrompt = msg["content"].(string)
 
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(mockAnthropicResponse("## Problem\nFix nil pointer.\n\n## Resolution\nAdded nil check."))
+		w.Write(mockAnthropicResponse("FACT: nil pointer on line 42 in store/query.go — pointer returned by DB scan is nil when no rows match; check rows.Next() before dereferencing."))
 	}))
 	defer server.Close()
 
@@ -177,8 +177,11 @@ func TestSynthesizeConversation_CallsAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SynthesizeConversation() error: %v", err)
 	}
-	if !strings.Contains(result, "## Problem") {
-		t.Errorf("expected structured result, got: %q", result)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 fact, got %d: %v", len(result), result)
+	}
+	if !strings.Contains(result[0], "nil pointer") {
+		t.Errorf("fact should mention nil pointer, got: %q", result[0])
 	}
 
 	// Verify all turns appear in the prompt.
@@ -196,8 +199,8 @@ func TestNilSynthesizer_Synthesize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nil Synthesizer.Synthesize() should not error: %v", err)
 	}
-	if result != "a\n\nb" {
-		t.Errorf("expected joined fallback, got: %q", result)
+	if len(result) != 2 || result[0] != "a" || result[1] != "b" {
+		t.Errorf("expected chunks unchanged, got: %v", result)
 	}
 }
 
@@ -211,8 +214,8 @@ func TestNilSynthesizer_SynthesizeConversation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nil Synthesizer.SynthesizeConversation() should not error: %v", err)
 	}
-	if !strings.Contains(result, "hello") {
-		t.Errorf("expected fallback with turn content, got: %q", result)
+	if result != nil {
+		t.Errorf("nil synthesizer should return nil, got: %v", result)
 	}
 }
 
@@ -435,17 +438,17 @@ func TestSynthesizeQA_PromptHasUnifiedStructure(t *testing.T) {
 	s := New("sk-test", server.URL)
 	_, _ = s.SynthesizeQA(context.Background(), "q", "a", "")
 
-	if !strings.Contains(capturedPrompt, "VALUE GATE") {
-		t.Error("prompt should contain VALUE GATE")
+	if !strings.Contains(capturedPrompt, "GATE") {
+		t.Error("prompt should contain GATE section")
 	}
-	if !strings.Contains(capturedPrompt, "DECOMPOSE") {
-		t.Error("prompt should contain DECOMPOSE step")
+	if !strings.Contains(capturedPrompt, "FORMAT") {
+		t.Error("prompt should contain FORMAT section")
 	}
 	if !strings.Contains(capturedPrompt, "FACT: ") {
 		t.Error("prompt should instruct FACT: output format")
 	}
-	if !strings.Contains(capturedPrompt, "ATOMIC FACTS") {
-		t.Error("prompt should reference atomic facts")
+	if !strings.Contains(capturedPrompt, "root cause") {
+		t.Error("prompt should reference root causes")
 	}
 }
 
@@ -530,11 +533,11 @@ func TestSynthesize_PromptContainsJournalisticInstruction(t *testing.T) {
 	s := New("sk-test", server.URL)
 	_, _ = s.Synthesize(context.Background(), []string{"chunk one", "chunk two"})
 
-	if !strings.Contains(capturedPrompt, "SIGNPOST FOR FUTURE AGENTS") {
-		t.Error("Synthesize prompt should frame as signpost for future agents")
+	if !strings.Contains(capturedPrompt, "Extract every distinct technical fact") {
+		t.Error("Synthesize prompt should instruct extraction of atomic facts")
 	}
-	if !strings.Contains(capturedPrompt, "aha moments") {
-		t.Error("Synthesize prompt should focus on aha moments")
+	if !strings.Contains(capturedPrompt, "No narration") {
+		t.Error("Synthesize prompt should prohibit narration")
 	}
 }
 
@@ -558,11 +561,11 @@ func TestSynthesizeConversation_PromptContainsJournalisticInstruction(t *testing
 	}
 	_, _ = s.SynthesizeConversation(context.Background(), turns)
 
-	if !strings.Contains(capturedPrompt, "SIGNPOST FOR FUTURE AGENTS") {
-		t.Error("SynthesizeConversation prompt should frame as signpost for future agents")
+	if !strings.Contains(capturedPrompt, "root causes") {
+		t.Error("SynthesizeConversation prompt should focus on root causes and gotchas")
 	}
-	if !strings.Contains(capturedPrompt, "what was DISCOVERED, not what was DONE") {
-		t.Error("SynthesizeConversation prompt should focus on discoveries not tasks")
+	if !strings.Contains(capturedPrompt, "Ignore the task narrative") {
+		t.Error("SynthesizeConversation prompt should ignore task narrative")
 	}
 }
 
@@ -677,7 +680,7 @@ func TestAzure_SKIP(t *testing.T) {
 func TestAzure_Synthesize(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.Write(mockAzureResponse("Combined knowledge about Go concurrency patterns."))
+		w.Write(mockAzureResponse("FACT: Combined knowledge about Go concurrency patterns."))
 	}))
 	defer server.Close()
 
@@ -691,7 +694,7 @@ func TestAzure_Synthesize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(result, "Go concurrency") {
-		t.Errorf("unexpected result: %q", result)
+	if len(result) != 1 || !strings.Contains(result[0], "Go concurrency") {
+		t.Errorf("unexpected result: %v", result)
 	}
 }

@@ -76,6 +76,13 @@ func (s Stats) String() string {
 		s.Scored, s.Pruned, s.Merged, s.Elapsed.Round(time.Millisecond))
 }
 
+// scoreQuerier is satisfied by stores that track per-retrieval similarity
+// scores. The Steward uses a type assertion so stores without this capability
+// degrade to frequency-based scoring without any interface change.
+type scoreQuerier interface {
+	AverageRetrievalScore(ctx context.Context, id primitive.ObjectID) (float64, bool, error)
+}
+
 // Steward is a long-running background service that maintains memory quality.
 type Steward struct {
 	cfg      Config
@@ -229,6 +236,8 @@ func (s *Steward) scoreMemories(ctx context.Context) (int, error) {
 	now := s.now()
 	scored := 0
 
+	sq, hasSQ := s.store.(scoreQuerier)
+
 	for _, m := range memories {
 		select {
 		case <-ctx.Done():
@@ -236,9 +245,19 @@ func (s *Steward) scoreMemories(ctx context.Context) (int, error) {
 		default:
 		}
 
-		// Base score from hit frequency (0.0 to 1.0).
+		// Base score: average retrieval similarity when available (preferred),
+		// falling back to normalized hit frequency. A memory retrieved at high
+		// cosine similarity is more valuable than one retrieved often at low
+		// similarity — this is the right signal for non-obvious facts.
 		var baseScore float64
-		if m.HitCount > 0 {
+		if hasSQ && m.HitCount > 0 {
+			if avg, ok, err := sq.AverageRetrievalScore(ctx, m.ID); err == nil && ok {
+				baseScore = avg
+			} else {
+				// Fallback: frequency-normalized score.
+				baseScore = math.Log2(float64(m.HitCount)+1) / math.Log2(float64(maxHits)+1)
+			}
+		} else if m.HitCount > 0 {
 			baseScore = math.Log2(float64(m.HitCount)+1) / math.Log2(float64(maxHits)+1)
 		} else {
 			baseScore = 0.5 // benefit of doubt for new memories

@@ -18,6 +18,23 @@ const (
 	ModeMCPReadOnly = "mcp-readonly" // MCP tools, search only — no writes
 )
 
+// Synthesis provider constants.
+const (
+	SynthesisAuto      = "auto"      // Prefer Anthropic if configured, else Azure
+	SynthesisAnthropic = "anthropic" // Force Anthropic (Haiku)
+	SynthesisAzure     = "azure"     // Force Azure OpenAI
+)
+
+// ValidSynthesisProvider returns true if v is a recognised provider value
+// (the empty string is also accepted and treated as "auto").
+func ValidSynthesisProvider(v string) bool {
+	switch v {
+	case "", SynthesisAuto, SynthesisAnthropic, SynthesisAzure:
+		return true
+	}
+	return false
+}
+
 // PipelineConfig tunes the write pipeline quality filters.
 // All values are live-reloadable via the dashboard — changes take effect
 // immediately without restarting the daemon. Prototype changes trigger a
@@ -86,9 +103,22 @@ type Config struct {
 	UpstreamAnthropicURL string           `yaml:"upstream_anthropic_url"`
 	AtlasMode            bool             `yaml:"atlas_mode"`
 	LLMSynthesis         bool             `yaml:"llm_synthesis"`
+	// SynthesisProvider selects which backend to use when both Anthropic and
+	// Azure are configured. Valid values: "auto" (prefer Anthropic, fall back
+	// to Azure), "anthropic", "azure". Empty == "auto".
+	SynthesisProvider string         `yaml:"synthesis_provider,omitempty"`
 	Azure                AzureConfig      `yaml:"azure"`
 	Steward              StewardConfig    `yaml:"steward"`
 	Pipeline             PipelineConfig   `yaml:"pipeline"`
+	Prompts              PromptsConfig    `yaml:"prompts,omitempty"`
+}
+
+// PromptsConfig holds optional user-customised prompt templates.
+// Empty strings mean "use the built-in default."
+type PromptsConfig struct {
+	QA           string `yaml:"qa,omitempty"           json:"qa,omitempty"`
+	Merge        string `yaml:"merge,omitempty"        json:"merge,omitempty"`
+	Conversation string `yaml:"conversation,omitempty" json:"conversation,omitempty"`
 }
 
 // ResolvedDatabases returns the effective list of databases.
@@ -379,6 +409,103 @@ func SaveAzureConfig(azureCfg AzureConfig) error {
 	}
 
 	cfg.Azure = azureCfg
+	out, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+
+	if err := EnsureDir(); err != nil {
+		return err
+	}
+	return os.WriteFile(Path(), out, 0600)
+}
+
+// ServerSettings is a partial Config containing top-level server/embedding/
+// retrieval/proxy fields editable from the dashboard. Pointer fields are only
+// applied when non-nil so callers can patch a subset.
+type ServerSettings struct {
+	Port                 *int    `json:"port,omitempty"`
+	MongoDBDatabase      *string `json:"mongodb_database,omitempty"`
+	ModelPath            *string `json:"model_path,omitempty"`
+	EmbeddingDim         *int    `json:"embedding_dim,omitempty"`
+	RetrievalTopK        *int    `json:"retrieval_top_k,omitempty"`
+	RetrievalMaxTokens   *int    `json:"retrieval_max_tokens,omitempty"`
+	UpstreamAnthropicURL *string `json:"upstream_anthropic_url,omitempty"`
+	AtlasMode            *bool   `json:"atlas_mode,omitempty"`
+	LLMSynthesis         *bool   `json:"llm_synthesis,omitempty"`
+	SynthesisProvider    *string `json:"synthesis_provider,omitempty"`
+}
+
+// SaveServerConfig persists the supplied server-level settings to disk,
+// preserving any other fields already present in the YAML file. Only non-nil
+// fields in patch are written.
+func SaveServerConfig(patch ServerSettings) error {
+	cfg := Default
+	data, err := os.ReadFile(Path())
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading config: %w", err)
+	}
+	if err == nil {
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return fmt.Errorf("parsing config: %w", err)
+		}
+	}
+
+	if patch.Port != nil {
+		cfg.Port = *patch.Port
+	}
+	if patch.MongoDBDatabase != nil {
+		cfg.MongoDBDatabase = *patch.MongoDBDatabase
+	}
+	if patch.ModelPath != nil {
+		cfg.ModelPath = *patch.ModelPath
+	}
+	if patch.EmbeddingDim != nil {
+		cfg.EmbeddingDim = *patch.EmbeddingDim
+	}
+	if patch.RetrievalTopK != nil {
+		cfg.RetrievalTopK = *patch.RetrievalTopK
+	}
+	if patch.RetrievalMaxTokens != nil {
+		cfg.RetrievalMaxTokens = *patch.RetrievalMaxTokens
+	}
+	if patch.UpstreamAnthropicURL != nil {
+		cfg.UpstreamAnthropicURL = *patch.UpstreamAnthropicURL
+	}
+	if patch.AtlasMode != nil {
+		cfg.AtlasMode = *patch.AtlasMode
+	}
+	if patch.LLMSynthesis != nil {
+		cfg.LLMSynthesis = *patch.LLMSynthesis
+	}
+	if patch.SynthesisProvider != nil {
+		cfg.SynthesisProvider = *patch.SynthesisProvider
+	}
+
+	out, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+	if err := EnsureDir(); err != nil {
+		return err
+	}
+	return os.WriteFile(Path(), out, 0600)
+}
+
+// SavePromptsConfig persists custom prompt templates to the config file.
+func SavePromptsConfig(promptsCfg PromptsConfig) error {
+	cfg := Default
+	data, err := os.ReadFile(Path())
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading config: %w", err)
+	}
+	if err == nil {
+		if err := yaml.Unmarshal(data, &cfg); err != nil {
+			return fmt.Errorf("parsing config: %w", err)
+		}
+	}
+
+	cfg.Prompts = promptsCfg
 	out, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)

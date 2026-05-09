@@ -229,12 +229,38 @@ func startCmd() *cobra.Command {
 				if cfg.LLMSynthesis {
 					apiKey := config.GetAnthropicAPIKey()
 					azureKey := config.GetAzureAPIKey()
+					azureReady := azureKey != "" && cfg.Azure.Endpoint != "" && cfg.Azure.Deployment != ""
+					anthropicReady := apiKey != ""
+
+					provider := cfg.SynthesisProvider
+					if provider == "" {
+						provider = config.SynthesisAuto
+					}
+
+					// Resolve the effective backend based on the requested
+					// provider and which credentials are actually available.
+					useAzure := false
+					switch provider {
+					case config.SynthesisAnthropic:
+						// Force Anthropic. If unavailable, fall through to disabled.
+					case config.SynthesisAzure:
+						if azureReady {
+							useAzure = true
+						}
+						// If Azure not ready, leave useAzure=false; will hit the
+						// "no key found" default branch below since anthropicReady
+						// is intentionally NOT consulted in this mode.
+						anthropicReady = false
+					default: // auto
+						if anthropicReady {
+							// keep useAzure=false
+						} else if azureReady {
+							useAzure = true
+						}
+					}
 
 					switch {
-					case apiKey != "":
-						synth = synthesizer.New(apiKey, cfg.UpstreamAnthropicURL)
-						log.Printf("LLM synthesis enabled (Anthropic, model: claude-haiku-4-5-20251001)")
-					case azureKey != "" && cfg.Azure.Endpoint != "" && cfg.Azure.Deployment != "":
+					case useAzure:
 						apiVersion := cfg.Azure.APIVersion
 						if apiVersion == "" {
 							apiVersion = "2024-06-01"
@@ -245,14 +271,23 @@ func startCmd() *cobra.Command {
 							APIVersion: apiVersion,
 							APIKey:     azureKey,
 						})
-						log.Printf("LLM synthesis enabled (Azure OpenAI, deployment: %s)", cfg.Azure.Deployment)
+						log.Printf("LLM synthesis enabled (Azure OpenAI, deployment: %s, provider=%s)", cfg.Azure.Deployment, provider)
+					case anthropicReady:
+						synth = synthesizer.New(apiKey, cfg.UpstreamAnthropicURL)
+						log.Printf("LLM synthesis enabled (Anthropic, model: claude-haiku-4-5-20251001, provider=%s)", provider)
 					default:
 						synth = synthesizer.New("", "")
-						log.Printf("LLM synthesis: enabled in config but no API key found (set ANTHROPIC_API_KEY or AZURE_OPENAI_API_KEY) — disabled")
+						log.Printf("LLM synthesis: provider=%s but required credentials missing — disabled", provider)
 					}
 				} else {
 					synth = synthesizer.New("", "")
 					log.Printf("LLM synthesis disabled (set llm_synthesis: true in config to enable)")
+				}
+
+				// Apply any saved custom prompt overrides.
+				if p := cfg.Prompts; p.QA != "" || p.Merge != "" || p.Conversation != "" {
+					synth.SetCustomPrompts(p.QA, p.Merge, p.Conversation)
+					log.Printf("custom prompt overrides loaded from config")
 				}
 
 				write = pipeline.NewWritePipeline(emb, primary.Store,

@@ -619,9 +619,27 @@ func (a *apiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 		anthropicKey := config.GetAnthropicAPIKey()
 		azureKey := config.GetAzureAPIKey()
 		mongoURI, _ := credential.Get("mongodb_atlas_uri")
+		// Fall back to the resolved URI from config (plain-text yaml, env, etc.)
+		// so the dashboard reflects "configured" status regardless of where
+		// the credential is stored.
+		if mongoURI == "" {
+			mongoURI = a.cfg.MongoDBAtlasURI
+		}
 
 		writeJSON(w, 200, map[string]any{
 			"mode": a.cfg.Mode,
+			"server": map[string]any{
+				"port":                   a.cfg.Port,
+				"mongodb_database":       a.cfg.MongoDBDatabase,
+				"model_path":             a.cfg.ModelPath,
+				"embedding_dim":          a.cfg.EmbeddingDim,
+				"retrieval_top_k":        a.cfg.RetrievalTopK,
+				"retrieval_max_tokens":   a.cfg.RetrievalMaxTokens,
+				"upstream_anthropic_url": a.cfg.UpstreamAnthropicURL,
+				"atlas_mode":             a.cfg.AtlasMode,
+				"llm_synthesis":          a.cfg.LLMSynthesis,
+				"synthesis_provider":     a.cfg.SynthesisProvider,
+			},
 			"mongodb": map[string]any{
 				"configured": mongoURI != "",
 				"uri_masked": maskCredential(mongoURI),
@@ -649,6 +667,7 @@ func (a *apiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 			AzureEndpoint   *string `json:"azure_endpoint,omitempty"`
 			AzureDeployment *string `json:"azure_deployment,omitempty"`
 			AzureAPIVersion *string `json:"azure_api_version,omitempty"`
+			Server          *config.ServerSettings `json:"server,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
@@ -738,6 +757,70 @@ func (a *apiHandler) handleSettings(w http.ResponseWriter, r *http.Request) {
 			}
 			a.cfg.Azure = azureCfg
 			changes = append(changes, "azure")
+			needRestart = true
+		}
+
+		// Server-level settings (port, mongodb_database, model_path,
+		// embedding_dim, retrieval_top_k/max_tokens, upstream_anthropic_url,
+		// atlas_mode, llm_synthesis). Always require a restart.
+		if req.Server != nil {
+			s := *req.Server
+			if s.Port != nil && (*s.Port < 1 || *s.Port > 65535) {
+				writeJSON(w, 400, map[string]string{"error": "port must be between 1 and 65535"})
+				return
+			}
+			if s.EmbeddingDim != nil && *s.EmbeddingDim < 1 {
+				writeJSON(w, 400, map[string]string{"error": "embedding_dim must be >= 1"})
+				return
+			}
+			if s.RetrievalTopK != nil && *s.RetrievalTopK < 1 {
+				writeJSON(w, 400, map[string]string{"error": "retrieval_top_k must be >= 1"})
+				return
+			}
+			if s.RetrievalMaxTokens != nil && *s.RetrievalMaxTokens < 1 {
+				writeJSON(w, 400, map[string]string{"error": "retrieval_max_tokens must be >= 1"})
+				return
+			}
+			if s.SynthesisProvider != nil && !config.ValidSynthesisProvider(*s.SynthesisProvider) {
+				writeJSON(w, 400, map[string]string{"error": "synthesis_provider must be one of: auto, anthropic, azure"})
+				return
+			}
+			if err := config.SaveServerConfig(s); err != nil {
+				writeJSON(w, 500, map[string]string{"error": "failed to save server settings: " + err.Error()})
+				return
+			}
+			// Reflect into in-memory cfg for the GET endpoint until restart.
+			if s.Port != nil {
+				a.cfg.Port = *s.Port
+			}
+			if s.MongoDBDatabase != nil {
+				a.cfg.MongoDBDatabase = *s.MongoDBDatabase
+			}
+			if s.ModelPath != nil {
+				a.cfg.ModelPath = *s.ModelPath
+			}
+			if s.EmbeddingDim != nil {
+				a.cfg.EmbeddingDim = *s.EmbeddingDim
+			}
+			if s.RetrievalTopK != nil {
+				a.cfg.RetrievalTopK = *s.RetrievalTopK
+			}
+			if s.RetrievalMaxTokens != nil {
+				a.cfg.RetrievalMaxTokens = *s.RetrievalMaxTokens
+			}
+			if s.UpstreamAnthropicURL != nil {
+				a.cfg.UpstreamAnthropicURL = *s.UpstreamAnthropicURL
+			}
+			if s.AtlasMode != nil {
+				a.cfg.AtlasMode = *s.AtlasMode
+			}
+			if s.LLMSynthesis != nil {
+				a.cfg.LLMSynthesis = *s.LLMSynthesis
+			}
+			if s.SynthesisProvider != nil {
+				a.cfg.SynthesisProvider = *s.SynthesisProvider
+			}
+			changes = append(changes, "server")
 			needRestart = true
 		}
 
@@ -953,12 +1036,90 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"lines": all, "total": len(all)})
 }
 
-// handlePrompts returns the default prompt templates used by the synthesizer.
+// handlePrompts handles GET/POST/DELETE for prompt templates.
+// GET returns the active prompts (custom overrides or defaults).
+// POST saves custom prompt overrides.
+// DELETE resets all prompts to built-in defaults.
 func (a *apiHandler) handlePrompts(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if r.Method != http.MethodGet {
+
+	switch r.Method {
+	case http.MethodGet:
+		active := synthesizer.DefaultPromptTemplates()
+		if a.synth != nil {
+			active = a.synth.PromptTemplates()
+		}
+		defaults := synthesizer.DefaultPromptTemplates()
+		writeJSON(w, 200, map[string]any{
+			"qa":           active["qa"],
+			"merge":        active["merge"],
+			"conversation": active["conversation"],
+			"customized": map[string]bool{
+				"qa":           active["qa"] != defaults["qa"],
+				"merge":        active["merge"] != defaults["merge"],
+				"conversation": active["conversation"] != defaults["conversation"],
+			},
+		})
+
+	case http.MethodPost:
+		var req struct {
+			QA           *string `json:"qa"`
+			Merge        *string `json:"merge"`
+			Conversation *string `json:"conversation"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeJSON(w, 400, map[string]string{"error": "invalid JSON"})
+			return
+		}
+
+		// Start from current custom prompts.
+		qa, merge, conv := "", "", ""
+		if a.synth != nil {
+			qa, merge, conv = a.synth.CustomPrompts()
+		}
+
+		// Update only the fields that were sent.
+		if req.QA != nil {
+			qa = strings.TrimSpace(*req.QA)
+		}
+		if req.Merge != nil {
+			merge = strings.TrimSpace(*req.Merge)
+		}
+		if req.Conversation != nil {
+			conv = strings.TrimSpace(*req.Conversation)
+		}
+
+		// Apply to synthesizer.
+		if a.synth != nil {
+			a.synth.SetCustomPrompts(qa, merge, conv)
+		}
+
+		// Persist to disk.
+		if err := config.SavePromptsConfig(config.PromptsConfig{
+			QA: qa, Merge: merge, Conversation: conv,
+		}); err != nil {
+			writeJSON(w, 200, map[string]any{
+				"status": "ok",
+				"note":   "applied in memory but disk write failed: " + err.Error(),
+			})
+			return
+		}
+		writeJSON(w, 200, map[string]string{"status": "ok"})
+
+	case http.MethodDelete:
+		if a.synth != nil {
+			a.synth.SetCustomPrompts("", "", "")
+		}
+		if err := config.SavePromptsConfig(config.PromptsConfig{}); err != nil {
+			writeJSON(w, 200, map[string]any{
+				"status": "ok",
+				"note":   "reset in memory but disk write failed: " + err.Error(),
+			})
+			return
+		}
+		writeJSON(w, 200, map[string]string{"status": "ok"})
+
+	default:
 		writeJSON(w, 405, map[string]string{"error": "method not allowed"})
-		return
 	}
-	writeJSON(w, 200, synthesizer.PromptTemplates())
 }

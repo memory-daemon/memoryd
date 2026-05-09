@@ -26,20 +26,14 @@ func TestFormatContext_SingleMemory(t *testing.T) {
 
 	result := FormatContext(memories, 2048)
 
-	if !strings.Contains(result, "<retrieved_context>") {
-		t.Error("expected opening context tag")
+	if !strings.Contains(result, "<memory>") {
+		t.Error("expected opening memory tag")
 	}
-	if !strings.Contains(result, "</retrieved_context>") {
-		t.Error("expected closing context tag")
+	if !strings.Contains(result, "</memory>") {
+		t.Error("expected closing memory tag")
 	}
 	if !strings.Contains(result, "Go is a compiled language.") {
 		t.Error("expected memory content")
-	}
-	if !strings.Contains(result, "claude-code") {
-		t.Error("expected source attribution")
-	}
-	if !strings.Contains(result, "0.95") {
-		t.Error("expected score")
 	}
 }
 
@@ -52,7 +46,7 @@ func TestFormatContext_MultipleMemories(t *testing.T) {
 
 	result := FormatContext(memories, 2048)
 
-	if !strings.Contains(result, "[1]") || !strings.Contains(result, "[2]") || !strings.Contains(result, "[3]") {
+	if !strings.Contains(result, "1.") || !strings.Contains(result, "2.") || !strings.Contains(result, "3.") {
 		t.Error("expected numbered entries for all memories")
 	}
 }
@@ -68,7 +62,7 @@ func TestFormatContext_TokenBudget(t *testing.T) {
 	if len(result) == 0 {
 		return
 	}
-	if !strings.Contains(result, "</retrieved_context>") {
+	if !strings.Contains(result, "</memory>") {
 		t.Error("expected closing tag even when truncated")
 	}
 }
